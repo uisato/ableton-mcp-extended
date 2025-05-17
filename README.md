@@ -4,7 +4,7 @@ A Python-based integration between Ableton Live and LLM assistants using the Mod
 
 ## Features
 
-- Control Ableton Live directly through AI assistants
+- Control Ableton Live directly through AI assistants (Claude and Cursor)
 - Create and manipulate MIDI clips, tracks, and audio
 - Load instruments, effects, and drum kits
 - Automate parameters and create dynamic music
@@ -15,7 +15,7 @@ A Python-based integration between Ableton Live and LLM assistants using the Mod
 ## Components
 
 ### Core MCP Server
-The standard MCP server that handles most interactions with Ableton Live through the MCP protocol.
+The standard MCP server that handles most interactions with Ableton Live through the MCP protocol. Integrates with Claude Desktop and Cursor.
 
 ### ElevenLabs Integration
 Provides voice synthesis and audio generation capabilities that can be imported directly into Ableton Live.
@@ -32,8 +32,11 @@ A high-performance alternative server implementation that uses UDP for parameter
 - Ableton Live 11 or higher
 - ElevenLabs API key (for voice-related features)
 - Additional requirements for specific components (see component READMEs)
+- For AI assistant integration: uv package manager
 
 ## Installation
+
+For complete installation instructions, see [INSTALLATION.md](INSTALLATION.md).
 
 1. Clone this repository:
    ```bash
@@ -63,6 +66,14 @@ A high-performance alternative server implementation that uses UDP for parameter
    ```
 
 2. In your AI assistant (like Cursor with Claude), you can now interact with Ableton using the provided tools.
+
+### AI Assistant Integration
+
+#### Claude Desktop
+Configure Claude Desktop to use the MCP server by editing your `claude_desktop_config.json` file. See [INSTALLATION.md](INSTALLATION.md) for details.
+
+#### Cursor
+Configure Cursor's MCP settings to use the Ableton MCP server. See [INSTALLATION.md](INSTALLATION.md) for details.
 
 ### XY Mouse Controller
 For expressive parameter control using your mouse:
@@ -94,6 +105,7 @@ To use these features, you'll need an ElevenLabs API key. You can get one by sig
 - Creating parameter automation from AI instructions
 - Using the mouse to expressively control effects parameters
 - High-performance real-time control using the UDP server
+- Asking Claude to create a complete track from a simple description
 
 ## License
 
@@ -101,4 +113,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
-Built upon the Model Context Protocol framework to enable AI control of Ableton Live. 
+Built upon the Model Context Protocol framework to enable AI control of Ableton Live.
+
+## Inspiration
+
+This project was inspired by the original [ahujasid/ableton-mcp](https://github.com/ahujasid/ableton-mcp) repository, with extended functionality for ElevenLabs integration and additional control methods. 
