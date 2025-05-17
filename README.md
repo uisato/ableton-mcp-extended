@@ -16,7 +16,9 @@ A Python-based integration between Ableton Live and LLM assistants using the Mod
 ## Components
 
 ### Core MCP Server
-The standard MCP server that handles most interactions with Ableton Live through the MCP protocol. Integrates with Claude Desktop and Cursor.
+The standard MCP server that handles most interactions with Ableton Live through the MCP protocol. Integrates with Claude Desktop and Cursor. It consists in:
+  - Ableton Remote Script (Ableton_Remote_Script/__init__.py): A MIDI Remote Script for Ableton Live that creates a socket server to receive and execute commands.
+  - MCP Server (server.py): A Python server that implements the Model Context Protocol and connects to the Ableton Remote Script.
 
 ### ElevenLabs Integration
 Provides voice synthesis and audio generation capabilities that can be imported directly into Ableton Live.
@@ -37,14 +39,6 @@ A high-performance alternative server implementation that uses UDP for parameter
 ## Installation
 
 For complete installation instructions, see [INSTALLATION.md](INSTALLATION.md).
-
-### Local Installation
-
-```bash
-git clone https://github.com/uisato/ableton-mcp-extended.git
-cd ableton-mcp-extended
-pip install -e .
-```
 
 ## Usage
 
