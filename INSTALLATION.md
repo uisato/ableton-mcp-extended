@@ -179,20 +179,6 @@ Example commands you can try:
 - "Get information about my current Ableton session"
 - "Generate a voice sample saying 'welcome to my track' and import it into Ableton"
 
-## Migrating from the Original ableton-mcp
-
-This extended version builds upon the original [ahujasid/ableton-mcp](https://github.com/ahujasid/ableton-mcp) by adding:
-- ElevenLabs integration
-- XY Mouse Controller
-- Hybrid TCP/UDP server
-- Additional documentation
-
-If you're migrating from the original:
-1. Uninstall the original package if installed: `pip uninstall ableton-mcp`
-2. Install this extended version following instructions above
-3. Update your Claude Desktop/Cursor configuration to use the correct path
-4. For local installations, ensure you're pointing to the correct directory
-
 ## Troubleshooting
 
 ### AI Assistant Integration Issues
