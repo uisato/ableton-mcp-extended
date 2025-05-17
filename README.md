@@ -24,7 +24,7 @@ The standard MCP server that handles most interactions with Ableton Live through
 Provides voice synthesis and audio generation capabilities that can be imported directly into Ableton Live.
 
 ### Hybrid TCP/UDP Server
-A high-performance alternative server implementation that uses UDP for parameter updates, providing lower latency for real-time control.
+A high-performance alternative server implementation that uses UDP for parameter updates, providing lower latency for real-time control. (Ableton-MCP_hybrid-server/AbletonMCP_UDP/init.py)
 
 ### Experimental Tools
 - **XY Mouse Controller**: Control any two Ableton parameters simultaneously using your mouse position for expressive performance control. Showing Ableton MCP capabilities for creating new experimental tools for interacting with Ableton Live.
