@@ -107,15 +107,7 @@ Follow these steps to install the Ableton Remote Script:
 
 1. Sign up for an ElevenLabs account at [https://elevenlabs.io](https://elevenlabs.io)
 2. Obtain your API key from your account settings
-3. Add the API key to your `.env` file:
-   ```
-   ELEVENLABS_API_KEY=your_elevenlabs_api_key
-   ```
-4. Create a directory in your Ableton User Library for ElevenLabs audio files:
-   ```
-   ELEVENLABS_OUTPUT_DIR=/path/to/your/ableton/user/library/eleven_labs_audio
-   ```
-5. Add the server to Cursor/Claude-Desktop just as you did for Ableton MCP:
+3. Add the server to Cursor/Claude-Desktop just as you did for Ableton MCP:
 
 ```json
 
