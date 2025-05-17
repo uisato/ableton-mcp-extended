@@ -21,7 +21,7 @@ The standard MCP server that handles most interactions with Ableton Live through
   - **MCP Server** (server.py): A Python server that implements the Model Context Protocol and connects to the Ableton Remote Script.
 
 ### ElevenLabs Integration
-Provides voice synthesis and audio generation capabilities that can be imported directly into Ableton Live.
+Provides voice synthesis and audio generation capabilities that can be imported directly into Ableton Live. (elevenlabs_mcp/server.py)
 
 ### Hybrid TCP/UDP Server
 A high-performance alternative server implementation that uses UDP for parameter updates, providing lower latency for real-time control. (Ableton-MCP_hybrid-server/AbletonMCP_UDP/init.py)
