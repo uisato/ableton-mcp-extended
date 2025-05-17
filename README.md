@@ -87,6 +87,9 @@ Configure Cursor's MCP settings to use the Ableton MCP server with local install
 Replace `C:/path/to/ableton-mcp-extended/MCP_Server/server.py` with the actual path on your system.
 See [INSTALLATION.md](INSTALLATION.md) for details.
 
+### Hybrid TCP/UDP Server
+For the alternative high-performance server, install the AbletonMCP_UDP remote script into your Ableton Live Remote Scripts folder. Both remote scripts can co-exist.
+
 ### XY Mouse Controller
 For expressive parameter control using your mouse:
 ```bash
@@ -94,9 +97,6 @@ cd experimental_tools/xy_mouse_controller
 pip install -r requirements.txt
 python mouse_parameter_controller_udp.py
 ```
-
-### Hybrid TCP/UDP Server
-For the alternative high-performance server, install the AbletonMCP_UDP remote script into your Ableton Live Remote Scripts folder.
 
 ## ElevenLabs Integration
 
@@ -123,9 +123,10 @@ To use these features, you'll need an ElevenLabs API key. You can get one by sig
 
 This extended version builds upon the original [ahujasid/ableton-mcp](https://github.com/ahujasid/ableton-mcp) repository by adding:
 
+- More integrated tools
 - ElevenLabs integration for voice synthesis and audio generation
-- XY Mouse Controller for expressive parameter control
 - Hybrid TCP/UDP server for high-performance parameter updates
+- XY Mouse Controller for expressive parameter control
 - Comprehensive documentation and installation options
 
 ## License
