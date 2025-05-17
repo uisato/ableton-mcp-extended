@@ -25,7 +25,7 @@ Provides voice synthesis and audio generation capabilities that can be imported 
 A high-performance alternative server implementation that uses UDP for parameter updates, providing lower latency for real-time control.
 
 ### Experimental Tools
-- **XY Mouse Controller**: Control any two Ableton parameters simultaneously using your mouse position for expressive performance control.
+- **XY Mouse Controller**: Control any two Ableton parameters simultaneously using your mouse position for expressive performance control. Showing Ableton MCP capabilities for creating new experimental tools for interacting with Ableton Live.
 
 ## Requirements
 
