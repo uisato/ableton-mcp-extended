@@ -75,6 +75,8 @@ If you want to run the server manually:
    python -m MCP_Server.server
    ```
 
+If you're using Cursor or Claude Desktop, you don't need to do this.
+
 ## Ableton Remote Script Installation
 
 Follow these steps to install the Ableton Remote Script:
