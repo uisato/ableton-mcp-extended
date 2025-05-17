@@ -32,17 +32,10 @@ A high-performance alternative server implementation that uses UDP for parameter
 - Ableton Live 11 or higher
 - ElevenLabs API key (for voice-related features)
 - Additional requirements for specific components (see component READMEs)
-- For AI assistant integration: uv package manager
 
 ## Installation
 
 For complete installation instructions, see [INSTALLATION.md](INSTALLATION.md).
-
-### Quick Install (Package Method)
-
-```bash
-pip install ableton-mcp-extended
-```
 
 ### Local Installation
 
@@ -65,41 +58,27 @@ pip install -e .
 ### AI Assistant Integration
 
 #### Claude Desktop
-Configure Claude Desktop to use the MCP server by editing your `claude_desktop_config.json` file. Two options are available:
+Configure Claude Desktop to use the MCP server by editing your `claude_desktop_config.json` file:
 
-1. Package Installation:
-   ```json
-   {
-     "mcpServers": {
-       "AbletonMCP": {
-         "command": "uvx",
-         "args": [
-           "ableton-mcp-extended"
-         ]
-       }
-     }
-   }
-   ```
+```json
+{
+  "mcpServers": {
+    "AbletonMCP": {
+      "command": "python",
+      "args": [
+        "-m", "MCP_Server.server"
+      ],
+      "cwd": "/absolute/path/to/ableton-mcp-extended"
+    }
+  }
+}
+```
 
-2. Local Installation:
-   ```json
-   {
-     "mcpServers": {
-       "AbletonMCP": {
-         "command": "python",
-         "args": [
-           "-m", "MCP_Server.server"
-         ],
-         "cwd": "/absolute/path/to/ableton-mcp-extended"
-       }
-     }
-   }
-   ```
-
+Replace `/absolute/path/to/ableton-mcp-extended` with the actual path on your system.
 See [INSTALLATION.md](INSTALLATION.md) for detailed instructions.
 
 #### Cursor
-Configure Cursor's MCP settings to use the Ableton MCP server with either package or local installation. See [INSTALLATION.md](INSTALLATION.md) for details.
+Configure Cursor's MCP settings to use the Ableton MCP server with local installation. See [INSTALLATION.md](INSTALLATION.md) for details.
 
 ### XY Mouse Controller
 For expressive parameter control using your mouse:
