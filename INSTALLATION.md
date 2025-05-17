@@ -1,6 +1,6 @@
 # Installation Guide
 
-This document provides detailed installation instructions for all components of the Ableton MCP project.
+This document provides detailed installation instructions for all components of the Ableton MCP Extended project.
 
 ## Prerequisites
 
@@ -22,7 +22,44 @@ The uv package manager is required for proper integration with Claude Desktop an
 
 ## AI Assistant Integration
 
+There are two ways to integrate with AI assistants: via package installation or direct local installation.
+
+### Installation Methods
+
+#### Method 1: Package Installation (Recommended)
+
+This method requires installing the package from PyPI:
+
+```bash
+pip install ableton-mcp-extended
+```
+
+Or using uv directly:
+
+```bash
+uv pip install ableton-mcp-extended
+```
+
+**Note:** This package name differs from the original `ableton-mcp` to avoid conflicts.
+
+#### Method 2: Local Installation
+
+If you prefer to run directly from your local copy:
+
+1. Clone the repository (if you haven't already):
+   ```bash
+   git clone https://github.com/uisato/ableton-mcp-extended.git
+   cd ableton-mcp-extended
+   ```
+   
+2. Install the dependencies:
+   ```bash
+   pip install -e .
+   ```
+
 ### Claude Desktop Integration
+
+#### Using Package Installation
 
 1. Open Claude Desktop application
 2. Go to Claude > Settings > Developer > Edit Config
@@ -33,43 +70,72 @@ The uv package manager is required for proper integration with Claude Desktop an
        "AbletonMCP": {
          "command": "uvx",
          "args": [
-           "ableton-mcp"
+           "ableton-mcp-extended"
          ]
        }
      }
    }
    ```
+
+#### Using Local Installation
+
+1. Open Claude Desktop application
+2. Go to Claude > Settings > Developer > Edit Config
+3. Edit the `claude_desktop_config.json` file to include:
+   ```json
+   {
+     "mcpServers": {
+       "AbletonMCP": {
+         "command": "python",
+         "args": [
+           "-m", "MCP_Server.server"
+         ],
+         "cwd": "/absolute/path/to/ableton-mcp-extended"
+       }
+     }
+   }
+   ```
+
+   Replace `/absolute/path/to/ableton-mcp-extended` with the actual path on your system:
+   - Windows example: `C:\\Users\\Username\\path\\to\\ableton-mcp-extended`
+   - macOS example: `/Users/username/path/to/ableton-mcp-extended`
+
 4. Save the config file and restart Claude Desktop
 5. When properly configured, you'll see a hammer icon with Ableton MCP tools in Claude
 
 ### Cursor Integration
 
+#### Using Package Installation
+
 1. Open Cursor
 2. Go to Settings > MCP
 3. Add a new MCP server with:
    - Name: AbletonMCP
-   - Command: `uvx ableton-mcp`
+   - Command: `uvx ableton-mcp-extended`
+4. Save the settings
+
+#### Using Local Installation
+
+1. Open Cursor
+2. Go to Settings > MCP
+3. Add a new MCP server with:
+   - Name: AbletonMCP
+   - Command: `python -m MCP_Server.server`
+   - Working Directory: `/absolute/path/to/ableton-mcp-extended`
 4. Save the settings
 
 ⚠️ **Important:** Only run one instance of the MCP server (either on Cursor or Claude Desktop), not both simultaneously.
 
 ## Core MCP Server
 
-1. Clone the repository:
+If you need to run the server manually:
+
+1. Navigate to your installation directory:
    ```bash
-   git clone https://github.com/uisato/ableton-mcp.git
-   cd ableton-mcp
+   cd /path/to/ableton-mcp-extended
    ```
-2. Install the package:
-   ```bash
-   pip install -e .
-   ```
-3. Set up your environment variables by creating a `.env` file in the project root:
-   ```
-   ELEVENLABS_API_KEY=your_elevenlabs_api_key
-   ELEVENLABS_OUTPUT_DIR=/path/to/your/ableton/user/library/eleven_labs_audio
-   ```
-4. Start the server manually (only if not using Claude Desktop or Cursor):
+
+2. Start the server:
    ```bash
    python -m MCP_Server.server
    ```
@@ -165,6 +231,20 @@ Example commands you can try:
 - "Get information about my current Ableton session"
 - "Generate a voice sample saying 'welcome to my track' and import it into Ableton"
 
+## Migrating from the Original ableton-mcp
+
+This extended version builds upon the original [ahujasid/ableton-mcp](https://github.com/ahujasid/ableton-mcp) by adding:
+- ElevenLabs integration
+- XY Mouse Controller
+- Hybrid TCP/UDP server
+- Additional documentation
+
+If you're migrating from the original:
+1. Uninstall the original package if installed: `pip uninstall ableton-mcp`
+2. Install this extended version following instructions above
+3. Update your Claude Desktop/Cursor configuration to use the new package name
+4. For local installations, ensure you're pointing to the correct directory
+
 ## Troubleshooting
 
 ### AI Assistant Integration Issues
@@ -173,6 +253,7 @@ Example commands you can try:
 - **Command not found errors**: Make sure you've installed uv/uvx properly
 - **Multiple instances**: Ensure you're only running one instance of the MCP server
 - **Timeout issues**: Try simplifying your requests or breaking them into smaller steps
+- **Package conflict**: If you have both original and extended versions installed, uninstall the original
 
 ### Port Conflicts
 

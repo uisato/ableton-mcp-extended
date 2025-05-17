@@ -1,7 +1,7 @@
 [project]
-name = "ableton-mcp"
+name = "ableton-mcp-extended"
 version = "1.0.0"
-description = "Ableton Live integration through the Model Context Protocol"
+description = "Ableton Live integration through the Model Context Protocol with ElevenLabs and extended features"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.scripts]
-ableton-mcp = "MCP_Server.server:main"
+ableton-mcp-extended = "MCP_Server.server:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
@@ -30,8 +30,8 @@ build-backend = "setuptools.build_meta"
 packages = ["MCP_Server", "elevenlabs_mcp", "AbletonMCP_UDP"]
 
 [project.urls]
-"Homepage" = "https://github.com/uisato/ableton-mcp"
-"Bug Tracker" = "https://github.com/uisato/ableton-mcp/issues"
+"Homepage" = "https://github.com/uisato/ableton-mcp-extended"
+"Bug Tracker" = "https://github.com/uisato/ableton-mcp-extended/issues"
 
 [project.optional-dependencies]
 xy_controller = [

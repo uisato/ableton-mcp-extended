@@ -1,6 +1,6 @@
-# Ableton MCP (Model Context Protocol)
+# Ableton MCP Extended
 
-A Python-based integration between Ableton Live and LLM assistants using the Model Context Protocol.
+A Python-based integration between Ableton Live and LLM assistants using the Model Context Protocol, with ElevenLabs integration and extended features.
 
 ## Features
 
@@ -38,24 +38,19 @@ A high-performance alternative server implementation that uses UDP for parameter
 
 For complete installation instructions, see [INSTALLATION.md](INSTALLATION.md).
 
-1. Clone this repository:
-   ```bash
-   git clone https://github.com/uisato/ableton-mcp.git
-   cd ableton-mcp
-   ```
+### Quick Install (Package Method)
 
-2. Install dependencies:
-   ```bash
-   pip install -e .
-   ```
+```bash
+pip install ableton-mcp-extended
+```
 
-3. Set up environment variables:
-   
-   Create a `.env` file in the root directory with the following variables:
-   ```
-   ELEVENLABS_API_KEY=your_elevenlabs_api_key
-   ELEVENLABS_OUTPUT_DIR=/path/to/your/ableton/user/library/eleven_labs_audio
-   ```
+### Local Installation
+
+```bash
+git clone https://github.com/uisato/ableton-mcp-extended.git
+cd ableton-mcp-extended
+pip install -e .
+```
 
 ## Usage
 
@@ -70,10 +65,41 @@ For complete installation instructions, see [INSTALLATION.md](INSTALLATION.md).
 ### AI Assistant Integration
 
 #### Claude Desktop
-Configure Claude Desktop to use the MCP server by editing your `claude_desktop_config.json` file. See [INSTALLATION.md](INSTALLATION.md) for details.
+Configure Claude Desktop to use the MCP server by editing your `claude_desktop_config.json` file. Two options are available:
+
+1. Package Installation:
+   ```json
+   {
+     "mcpServers": {
+       "AbletonMCP": {
+         "command": "uvx",
+         "args": [
+           "ableton-mcp-extended"
+         ]
+       }
+     }
+   }
+   ```
+
+2. Local Installation:
+   ```json
+   {
+     "mcpServers": {
+       "AbletonMCP": {
+         "command": "python",
+         "args": [
+           "-m", "MCP_Server.server"
+         ],
+         "cwd": "/absolute/path/to/ableton-mcp-extended"
+       }
+     }
+   }
+   ```
+
+See [INSTALLATION.md](INSTALLATION.md) for detailed instructions.
 
 #### Cursor
-Configure Cursor's MCP settings to use the Ableton MCP server. See [INSTALLATION.md](INSTALLATION.md) for details.
+Configure Cursor's MCP settings to use the Ableton MCP server with either package or local installation. See [INSTALLATION.md](INSTALLATION.md) for details.
 
 ### XY Mouse Controller
 For expressive parameter control using your mouse:
@@ -106,6 +132,15 @@ To use these features, you'll need an ElevenLabs API key. You can get one by sig
 - Using the mouse to expressively control effects parameters
 - High-performance real-time control using the UDP server
 - Asking Claude to create a complete track from a simple description
+
+## Difference from Original ableton-mcp
+
+This extended version builds upon the original [ahujasid/ableton-mcp](https://github.com/ahujasid/ableton-mcp) repository by adding:
+
+- ElevenLabs integration for voice synthesis and audio generation
+- XY Mouse Controller for expressive parameter control
+- Hybrid TCP/UDP server for high-performance parameter updates
+- Comprehensive documentation and installation options
 
 ## License
 
