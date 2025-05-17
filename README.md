@@ -89,7 +89,9 @@ Replace `C:/path/to/ableton-mcp-extended/MCP_Server/server.py` with the actual p
 See [INSTALLATION.md](INSTALLATION.md) for details.
 
 ### Hybrid TCP/UDP Server
-For the alternative high-performance server, install the AbletonMCP_UDP remote script into your Ableton Live Remote Scripts folder. Both remote scripts can co-exist.
+For the alternative high-performance server, install the AbletonMCP_UDP remote script into your Ableton Live Remote Scripts folder. Both remote scripts can co-exist:
+
+![image](https://github.com/user-attachments/assets/24997e12-8a80-433f-9070-ac72be684a87)
 
 ### XY Mouse Controller
 For expressive parameter control using your mouse:
