@@ -7,10 +7,11 @@ A Python-based integration between Ableton Live and LLM assistants using the Mod
 - Control Ableton Live directly through AI assistants (Claude and Cursor)
 - Create and manipulate MIDI clips, tracks, and audio
 - Load instruments, effects, and drum kits
-- Automate parameters and create dynamic music
-- Integrate with other MCP servers, like for example ElevenLabs for text-to-speech, voice synthesis, and SFX generation
-- Mouse XY parameter control for expressive performance (As an example of powerful tool creation through Ableton MCP
+- Parameter automation (still experimental)
 - High-performance hybrid TCP/UDP server for low-latency parameter control
+- Integrate with other MCP servers, like for example ElevenLabs for text-to-speech, voice synthesis, and SFX generation
+- Mouse XY parameter control for expressive performance (As an example of powerful tool creation through Ableton MCP)
+
 
 ## Components
 
