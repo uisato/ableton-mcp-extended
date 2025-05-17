@@ -8,4 +8,37 @@ wheels/
 
 # Virtual environments
 .venv
+venv/
+ENV/
+
+# Environment variables - sensitive data
+.env
+.env.*
+
+# IDE files
+.idea/
+.vscode/
+*.sublime-*
+
+# System files
 .DS_Store
+Thumbs.db
+
+# Audio files
+*.mp3
+*.wav
+*.aif
+*.aiff
+
+# Temporary files
+*.bak
+*.tmp
+*.log
+
+# Ableton-specific
+*.als
+*.alc
+*.adg
+*.adv
+*.asd
+!AbletonMCP_Remote_Script/*
