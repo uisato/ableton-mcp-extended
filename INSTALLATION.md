@@ -63,7 +63,7 @@ This document provides detailed installation instructions for all components of 
 
 ## Core MCP Server
 
-If you need to run the server manually:
+If you want to run the server manually:
 
 1. Navigate to your installation directory:
    ```bash
@@ -113,6 +113,25 @@ Follow these steps to install the Ableton Remote Script:
    ```
    ELEVENLABS_OUTPUT_DIR=/path/to/your/ableton/user/library/eleven_labs_audio
    ```
+5. Add the server to Cursor/Claude-Desktop just as you did for Ableton MCP:
+
+```json
+
+  {
+    "mcpServers": {
+      "ElevenLabs": {
+        "command": "python",
+        "args": [
+          "C:/path/to/elevenlabs_mcp/server.py"
+        ],
+        "env": {
+          "ELEVENLABS_API_KEY": "your-api-key",
+          "ELEVENLABS_MCP_BASE_PATH": "path/to/your/ableton/user/library/eleven_labs_audio"
+        }
+      }
+    }
+  }
+```
 
 ## XY Mouse Controller
 
