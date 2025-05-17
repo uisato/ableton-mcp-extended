@@ -1,0 +1,3 @@
+pynput>=1.7.6
+screeninfo>=0.8.1
+# tkinter is included in standard Python distribution 

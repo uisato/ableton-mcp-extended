@@ -35,17 +35,16 @@ This document provides detailed installation instructions for all components of 
        "AbletonMCP": {
          "command": "python",
          "args": [
-           "-m", "MCP_Server.server"
-         ],
-         "cwd": "/absolute/path/to/ableton-mcp-extended"
+           "C:/path/to/ableton-mcp-extended/MCP_Server/server.py"
+         ]
        }
      }
    }
    ```
 
-   Replace `/absolute/path/to/ableton-mcp-extended` with the actual path on your system:
-   - Windows example: `C:\\Users\\Username\\path\\to\\ableton-mcp-extended`
-   - macOS example: `/Users/username/path/to/ableton-mcp-extended`
+   Replace `C:/path/to/ableton-mcp-extended/MCP_Server/server.py` with the actual path on your system:
+   - Windows example: `C:\\Users\\Username\\path\\to\\ableton-mcp-extended\\MCP_Server\\server.py`
+   - macOS example: `/Users/username/path/to/ableton-mcp-extended/MCP_Server/server.py`
 
 4. Save the config file and restart Claude Desktop
 5. When properly configured, you'll see a hammer icon with Ableton MCP tools in Claude
@@ -56,8 +55,8 @@ This document provides detailed installation instructions for all components of 
 2. Go to Settings > MCP
 3. Add a new MCP server with:
    - Name: AbletonMCP
-   - Command: `python -m MCP_Server.server`
-   - Working Directory: `/absolute/path/to/ableton-mcp-extended`
+   - Command: `python`
+   - Args: `["C:/path/to/ableton-mcp-extended/MCP_Server/server.py"]`
 4. Save the settings
 
 ⚠️ **Important:** Only run one instance of the MCP server (either on Cursor or Claude Desktop), not both simultaneously.

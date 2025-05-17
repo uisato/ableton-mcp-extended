@@ -47,14 +47,6 @@ pip install -e .
 
 ## Usage
 
-### Standard MCP Server
-1. Start the Ableton MCP server:
-   ```bash
-   python -m MCP_Server.server
-   ```
-
-2. In your AI assistant (like Cursor with Claude), you can now interact with Ableton using the provided tools.
-
 ### AI Assistant Integration
 
 #### Claude Desktop
@@ -66,19 +58,34 @@ Configure Claude Desktop to use the MCP server by editing your `claude_desktop_c
     "AbletonMCP": {
       "command": "python",
       "args": [
-        "-m", "MCP_Server.server"
-      ],
-      "cwd": "/absolute/path/to/ableton-mcp-extended"
+        "C:/path/to/ableton-mcp-extended/MCP_Server/server.py"
+      ]
     }
   }
 }
 ```
 
-Replace `/absolute/path/to/ableton-mcp-extended` with the actual path on your system.
+Replace `C:/path/to/ableton-mcp-extended/MCP_Server/server.py` with the actual path on your system.
 See [INSTALLATION.md](INSTALLATION.md) for detailed instructions.
 
 #### Cursor
-Configure Cursor's MCP settings to use the Ableton MCP server with local installation. See [INSTALLATION.md](INSTALLATION.md) for details.
+Configure Cursor's MCP settings to use the Ableton MCP server with local installation:
+
+```json
+{
+  "mcpServers": {
+    "AbletonMCP": {
+      "command": "python",
+      "args": [
+        "C:/path/to/ableton-mcp-extended/MCP_Server/server.py"
+      ]
+    }
+  }
+}
+```
+
+Replace `C:/path/to/ableton-mcp-extended/MCP_Server/server.py` with the actual path on your system.
+See [INSTALLATION.md](INSTALLATION.md) for details.
 
 ### XY Mouse Controller
 For expressive parameter control using your mouse:
