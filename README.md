@@ -16,17 +16,15 @@ Imagine controlling Ableton Live just by talking to an AI assistant. No more cli
 
 **Transform this conversation:**
 ```
-👤 "Create a drum pattern with a punchy kick every beat and snappy snares on 2 and 4"
-🤖 "Creating MIDI track with drum rack... Adding kick pattern... Adding snare hits... Done!"
-👤 "Now add a warm analog bass playing C-G-F-E progression"  
-🤖 "Loading Analog bass preset... Creating bass clip with your progression... Perfect!"
-👤 "Generate a voice saying 'Drop the beat' and add it as an intro"
-🤖 "Generating speech with ElevenLabs... Importing to new audio track... Ready to drop!"
+👤 "Create a brief minimalist/neo-classical composition in a style similar to Ólafur Arnalds'. (Ableton MCP) / I've loaded four MIDI tracks called "Noire" and "Noire (2) ["Emotional Felt" presets], "Noire (2) ["Reversed Felt" preset, for ambient background], and "Noire (3) ["Ethereal Felt" preset, also for ambient background]. All loaded with nice piano instruments. You have also a MIDI track called "Strings" with a nice string ensemble instrument loaded. Feel free to add new instruments and effects, if pertinent."
+🤖 "Creating MIDI clips... Adding effects... Done!"
+👤 "Then, use ElevenLabs MCP to create a spoken-word audio clip (default voice and settings) with a relevant poem in the style of “Jim Morrison” to accompany the composition."  
+🤖 "Generating poem... Transforming it into speech... Importing it into your session... Done!"
 ```
 
 **Into this music production session** ⬇️
 
-*[Demo video placeholder - showing the actual conversation creating a track]*
+https://github.com/user-attachments/assets/d6ef2de5-bdeb-4097-acc0-67d70f7f85b3
 
 ---
 
