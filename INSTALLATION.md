@@ -5,69 +5,50 @@
 
 ---
 
-## 📋 Pre-Installation Checklist
+## 📋 Prerequisites
 
 Before we start, make sure you have:
 
 - [ ] **Ableton Live 11 or newer** (any edition - Intro, Standard, or Suite)
 - [ ] **Python 3.10 or higher** ([Download here](https://www.python.org/downloads/))
-- [ ] **Claude Desktop** or **Cursor IDE** ([Claude](https://claude.ai/download) | [Cursor](https://cursor.sh/))
+- [ ] **Git** command-line tool.
+- [ ] **Claude Desktop** or **Cursor IDE** ([Claude](https://claude.ai/download) | [Cursor](https://cursor.sh/)) | **Gemini CLI** works, but I've tested it and it's nowhere as good as the previous.
 - [ ] **15 minutes** of uninterrupted time
 - [ ] **Administrator privileges** on your computer
 
 ---
 
-## 🎯 Installation Overview
+## Installation Steps
 
-We'll install **3 main components** in this order:
+The installation process involves three main steps: getting the code, installing the remote script in Ableton, and configuring your AI assistant.
 
-```mermaid
-graph LR
-    A[1. Get the Code] --> B[2. Install Remote Script]
-    B --> C[3. Connect AI Assistant]
-    C --> D[🎉 Start Creating Music!]
-```
+### Step 1: Get the Code
 
-**Estimated time:** 8-12 minutes  
-**Difficulty:** Beginner-friendly
+First, clone the repository and install the required Python package.
 
----
+1.  **Clone the Repository:**
+    ```bash
+    git clone [https://github.com/uisato/ableton-mcp-extended.git](https://github.com/uisato/ableton-mcp-extended.git)
+    cd ableton-mcp-extended
+    ```
 
-## 🔽 Step 1: Get the Code (2 minutes)
+2.  **Install the Package:**
+    This command installs the project in "editable" mode, which is recommended.
+    ```bash
+    pip install -e .
+    ```
 
-### Download & Install
-
-**Option A: Using Git (Recommended)**
-```bash
-# Clone the repository
-git clone https://github.com/uisato/ableton-mcp-extended.git
-cd ableton-mcp-extended
-
-# Install with pip
-pip install -e .
-```
-
-**Option B: Download ZIP**
-1. Go to [GitHub repository](https://github.com/uisato/ableton-mcp-extended)
-2. Click **"Code"** → **"Download ZIP"**
-3. Extract to your desired location
-4. Open terminal in the folder and run: `pip install -e .`
-
-### ✅ Checkpoint 1: Verify Installation
-Run this command to verify everything installed correctly:
-```bash
-python -c "import MCP_Server; print('✅ Installation successful!')"
-```
-
-**Expected result:** `✅ Installation successful!`
-
-> ✅ **Success indicator:** If you see this message, you're ready to proceed to the next step.
+3.  **Verify Installation:**
+    Run the following command. A success message indicates the Python component is correctly installed.
+    ```bash
+    python -c "from mcp.server.fastmcp import FastMCP; print('✅ Python package installed successfully!')"
+    ```
 
 ---
 
-## 🎛️ Step 2: Install Ableton Remote Scripts (3 minutes)
+### Step 2: Install the Ableton Remote Script
 
-### Find Your Remote Scripts Folder
+Ableton Live loads control scripts from a specific user directory.
 
 Your Ableton Remote Scripts location depends on your operating system:
 
@@ -105,37 +86,32 @@ Remote Scripts/
 └── (other scripts...)
 ```
 
-### ✅ Checkpoint 2: Verify Folder Structure
-The folder `AbletonMCP` should exist with the `__init__.py` file inside.
+Same would apply if you want to install the UDP version of Ableton MCP server. Create another folder (I called it "AbletonMCP_UDP") and place its corresponding '__init__.py' inside. Both servers can co-exist.
 
-> 💡 **Pro tip:** Double-check this folder structure - it's the most common source of installation issues.
-
----
-
-## 🎵 Step 3: Configure Ableton Live (2 minutes)
-
-### Enable the Remote Script
-
-1. **Open Ableton Live**
-2. Go to **Preferences** (Ctrl+, or Cmd+,)
-3. Navigate to **Link, Tempo & MIDI**
-4. In the **Control Surface** dropdown, select **"AbletonMCP"**
-5. Set **Input** to **"None"**
-6. Set **Output** to **"None"**
-7. **Close** Preferences
-
-### ✅ Checkpoint 3: Verify Connection
-Look for confirmation in Ableton's status bar or log that the script loaded successfully.
-
-> 🎛️ **Verification:** Your Ableton should now show "AbletonMCP" as the selected control surface in preferences.
+> 💡 **Tip:** Double-check this folder structure - it's the most common source of installation issues.
 
 ---
 
-## 🤖 Step 4: Connect Your AI Assistant (3 minutes)
+### Step 3: Configure Ableton Live
+
+Enable the Remote Script:
+
+1.  **Open or restart Ableton Live.**
+2.  Navigate to **Preferences** (`Ctrl + ,` or `Cmd + ,`).
+3.  Go to the **Link, Tempo & MIDI** tab.
+4.  In an empty **Control Surface** slot, select **AbletonMCP** from the dropdown menu.
+5.  Set the **Input** and **Output** for the `AbletonMCP` surface to **None**.
+6.  Close the Preferences window.
+
+When the script is loaded correctly, you will see a message in Ableton's status bar: **"AbletonMCP: Listening for commands on port 9877"**.
+
+---
+
+### Step 4: Connect Your AI Assistant
 
 Choose your preferred AI assistant:
 
-### 🔵 Claude Desktop (Recommended)
+### 🔵 Claude Desktop
 
 1. **Open Claude Desktop**
 2. Go to **Claude** → **Settings** → **Developer**
@@ -175,27 +151,39 @@ echo $PWD/MCP_Server/server.py
 
 1. **Open Cursor**
 2. Go to **Settings** → **MCP**
-3. **Add new server:**
-   - **Name:** `AbletonMCP`
-   - **Command:** `python`
-   - **Args:** `["C:/path/to/ableton-mcp-extended/MCP_Server/server.py"]`
+3. **Add new MCP server:**
+   - **Paste this**:
+
+```json
+{
+  "mcpServers": {
+    "AbletonMCP": {
+      "command": "python",
+      "args": [
+        "C:/path/to/ableton-mcp-extended/MCP_Server/server.py"
+      ]
+    }
+  }
+}
+```
+
 4. **Save settings**
 
-### ✅ Checkpoint 4: Verify AI Connection
+### Verify AI Connection
 
 **For Claude Desktop:**
 Look for a **🔨 hammer icon** in the chat interface - this indicates MCP tools are loaded.
 
 **For Cursor:**
-Try asking: *"What Ableton MCP tools do you have available?"*
+You'll see a green dot next to the MCP server icon, and a message saying "40 tools enabled".
 
-> 🤖 **Success indicator:** Your AI assistant should now have access to Ableton MCP tools and can list them.
+You might have to restart your AI assistant in order for changes to impact.
 
 ---
 
-## 🎉 Step 5: Test Your Installation (2 minutes)
+### Step 5: Test Your Installation
 
-Let's make sure everything works! Try these commands with your AI assistant:
+To confirm everything is working, try these commands in your AI assistant:
 
 ### Basic Tests
 1. **"Get information about my current Ableton session"**
@@ -207,12 +195,11 @@ Let's make sure everything works! Try these commands with your AI assistant:
 3. **"What tracks do I currently have?"**
    - Should list your tracks
 
-### ✅ Final Checkpoint: Full Integration Test
 If all three commands work correctly, congratulations! 🎉 Your installation is complete.
 
 ---
 
-## 🚀 Optional: Advanced Features
+### Optional: Advanced Features
 
 <details>
 <summary><strong>⚡ High-Performance UDP Server (For Real-Time Control)</strong></summary>
@@ -355,33 +342,19 @@ python -c "import socket; s = socket.socket(); s.connect(('localhost', 9877)); p
 
 ---
 
-## 🎬 Capabilities Demonstration
+## Capabilities Demonstration
 
 📹 **See Ableton MCP Extended in action:** [Link to your capabilities demonstration]
 
-**What you'll see in the demo:**
-- 🎵 Creating complete tracks through AI conversation
-- 🎤 Generating and importing ElevenLabs voices
-- 🎛️ Real-time parameter control with mouse movements
-- 🎹 Loading instruments and building arrangements
-- 🎼 Advanced music production techniques with AI
-- 💡 Creative workflows and inspiration
-
 ---
 
-## ✅ Installation Complete!
+## Installation Complete!
 
-**You're now ready to create music with AI! 🎵**
+**You're now ready to co-create with your AI assistant!**
 
 ### 🚀 Next Steps:
 1. **[Watch the Demo Video](#-capabilities-demonstration)** - See the amazing possibilities
 2. **[Join the Community](https://patreon.com/uisato)** - Share your creations
-
-### 🎯 Suggested First Projects:
-- *"Create a simple drum pattern"*
-- *"Add a bass line to my track"*
-- *"Generate a voice saying 'welcome to my song'"*
-- *"Apply some reverb to track 2"*
 
 ---
 
@@ -394,7 +367,7 @@ python -c "import socket; s = socket.socket(); s.connect(('localhost', 9877)); p
 
 <div align="center">
 
-**🎉 Welcome to the future of music production!**
+**Welcome to the future of music production!**
 
 *Ready to make music through conversation? Let's create something amazing together.*
 
