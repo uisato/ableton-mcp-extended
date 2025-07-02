@@ -241,7 +241,12 @@ This project includes several specialized components:
 - **Discussions**: Share your creations and get help
 
 ### **Share Your Creations**
-Tag us (@uisato_) with your AI-generated experiments! I love seeing what the community creates.
+Tag me with your AI-generated experiments! I love seeing what the community creates:
+
+[YouTube](https://www.youtube.com/@uisato_)
+[Instagram](https://www.instagram.com/uisato_)
+[Patreon](https://www.patreon.com/c/uisato)
+[Website](https://www.uisato.art/)
 
 ---
 
