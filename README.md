@@ -1,8 +1,5 @@
-# 🎵 Ableton MCP Extended
-**Control Ableton Live with AI - Create music through natural conversation**
-
-> *"Hey Claude, create a chill lo-fi beat with a warm bass, add some vinyl crackle, and generate a voice saying 'welcome to the vibe'"*  
-> ✨ *Minutes later, you have a complete track.*
+# Ableton MCP Extended
+**Control Ableton Live using natural language via AI assistants like Claude or Cursor. This project provides a robust Model Context Protocol (MCP) server that translates conversational commands into precise actions within your Ableton Live session.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
@@ -10,11 +7,9 @@
 
 ---
 
-## 🚀 What This Does
+This tool is designed for producers, developers, and AI enthusiasts who want to streamline their music production workflow, experiment with generative music, and build custom integrations with Ableton Live.
 
-Imagine controlling Ableton Live just by talking to an AI assistant. No more clicking through menus, dragging samples, or remembering complex key combinations. Just describe what you want, and watch your musical ideas come to life.
-
-**Transform this conversation:**
+**You can transform this conversation:**
 ```
 👤 "Create a brief minimalist/neo-classical composition in a style similar to Ólafur Arnalds'. (Ableton MCP) / I've loaded four MIDI tracks called "Noire" and "Noire (2) ["Emotional Felt" presets], "Noire (2) ["Reversed Felt" preset, for ambient background], and "Noire (3) ["Ethereal Felt" preset, also for ambient background]. All loaded with nice piano instruments. You have also a MIDI track called "Strings" with a nice string ensemble instrument loaded. Feel free to add new instruments and effects, if pertinent."
 🤖 "Creating MIDI clips... Adding effects... Done!"
@@ -22,38 +17,60 @@ Imagine controlling Ableton Live just by talking to an AI assistant. No more cli
 🤖 "Generating poem... Transforming it into speech... Importing it into your session... Done!"
 ```
 
-**Into this music production session** ⬇️
+**Into this music production session**:
 
 https://github.com/user-attachments/assets/d6ef2de5-bdeb-4097-acc0-67d70f7f85b3
 
 ---
 
-## ✨ Key Features
+## Key Features
 
-### 🎯 **AI-Powered Music Creation**
-- **Natural Language Control**: "Add a reverb to track 2" → Done instantly
-- **Intelligent Track Building**: AI understands music theory and production techniques
-- **Creative Assistance**: Get suggestions for chord progressions, drum patterns, and arrangements
+This project provides comprehensive, programmatic control over the Ableton Live environment.
 
-### 🎤 **Voice & Audio Generation** 
-- **Text-to-Speech Integration**: Generate narration, vocal samples, or spoken elements
-- **Custom Voice Creation**: Clone voices for unique character in your tracks  
-- **Sound Effects**: Create custom SFX with AI ("generate the sound of rain on a window")
-- **Direct Import**: Generated audio appears instantly in your Ableton session
+* **Session and Transport Control:**
+    * Start and stop playback.
+    * Get session info, including tempo, time signature, and track count.
+    * Manage scenes: create, delete, rename, and fire.
 
-### 🎮 **Extensible Framework for Custom Tools**
-- **Example: XY Mouse Controller**: Demonstrates creating custom Ableton controllers with the MCP framework
-- **Ultra-Low Latency**: High-performance UDP protocol enables responsive real-time control
-- **Unlimited Possibilities**: Build your own custom tools and controllers for Ableton Live
+* **Track Management:**
+    * Create, rename, and get detailed information for MIDI and audio tracks.
+    * Control track properties: volume, panning, mute, solo, and arm.
+    * Manage track grouping and folding states.
 
-### 🔧 **Professional Integration**
-- **Ableton API Access**: Control over tracks, clips, effects, and automation
-- **Non-Destructive Workflow**: Works alongside your existing production process
-- **Multiple AI Assistants**: Compatible with Claude Desktop and Cursor
+* **MIDI Clip and Note Manipulation:**
+    * Create and name MIDI clips with specified lengths.
+    * Add, delete, transpose, and quantize notes within clips.
+    * Perform batch edits on multiple notes in a single operation.
+    * Adjust clip loop parameters and follow actions.
+
+* **Device and Parameter Control:**
+    * Load instruments and effects from Ableton's browser by URI.
+    * Get a full list of parameters for any device on a track.
+    * Set and batch-set device parameters using normalized values (0.0 to 1.0).
+
+* **Automation and Envelopes:**
+    * Add and clear automation points for any device parameter within a clip. [This feature isn't working perfectly yet.]
+    * Get information about existing clip envelopes.
+
+* **Browser Integration:**
+    * Navigate and list items from Ableton's browser.
+    * Load instruments, effects, and samples directly from a browser path or URI.
+    * Import audio files directly into audio tracks or clip slots.
+
+* **Voice & Audio Generation** 
+    * Text-to-Speech Integration: Generate narration, vocal samples, or spoken elements through ElevenLabs MCP [included].
+    * Custom Voice Creation: Clone voices for unique character in your tracks  
+    * Sound Effects: Create custom SFX with AI
+    * Direct Import: Generated audio appears instantly in your Ableton session
+
+* **Extensible Framework for Custom Tools**
+    * Example: XY Mouse Controller: Demonstrates creating custom Ableton controllers with the MCP framework
+    * Ultra-Low Latency: High-performance UDP protocol enables responsive real-time control
+    * Unlimited Possibilities: Build your own custom tools and controllers for Ableton Live
 
 ---
 
-## 🏃‍♂️ Quick Start (5 Minutes)
+##  Quick Start (5 Minutes)
 
 ### Prerequisites
 - Ableton Live 11+ (any edition)
@@ -97,7 +114,7 @@ pip install -e .
 **For Cursor:**
 Add MCP server in Settings → MCP with the same path.
 
-### 5. **Start Creating! 🎉**
+### 5. **Start Creating! **
 Open your AI assistant and try:
 - *"Create a new MIDI track with a piano"*
 - *"Add a simple drum beat"*
@@ -105,64 +122,33 @@ Open your AI assistant and try:
 
 ---
 
-## 🎼 What You Can Create
-
-### 🥁 **Rhythm & Beats**
-```
-"Create a trap-style drum pattern with hi-hats on every 16th note"
-"Add a kick drum that hits on beats 1 and 3 with a slight swing"
-"Layer in some percussion fills every 4 bars"
-```
-
-### 🎹 **Melodies & Harmony**  
-```
-"Create a sad piano melody in D minor"
-"Add warm pad chords that follow a I-vi-IV-V progression"
-"Generate a bass line that complements the existing chords"
-```
-
-### 🎤 **Vocals & Voice**
-```
-"Generate a voice saying 'Welcome to the future of music'"
-"Create a robotic voice effect for this vocal sample"  
-"Add some breath sounds and vocal texture to track 3"
-```
-
-### 🎛️ **Effects & Processing**
-```
-"Add some vintage tape saturation to the drums"
-"Create a filter sweep automation on the synth lead"
-"Apply some spatial reverb to create depth"
-```
-
----
-
-## 📊 How It Works
+## How It Works
 
 ```mermaid
 graph TB
     A[You: Natural Language] --> B[AI Assistant]
     B --> C[MCP Server]
     C --> D[Ableton Remote Script]
-    D --> E[Ableton Live]
+    D --> E[Ableton Live API]
     E --> F[🎵 Your Music]
     
     G[ElevenLabs AI] --> H[Generated Audio]
     H --> C
 ```
 
-1. **You speak naturally** to Claude or Cursor
-2. **AI understands** your musical intent
-3. **MCP Server** translates to Ableton commands
-4. **Remote Script** executes in Ableton Live
-5. **Your music** is created instantly
+1. You issue a command in plain English to your AI assistant (e.g., "Create a new MIDI track and name it 'Bass'").
+2. The AI Assistant understands the intent and calls the appropriate tool from the MCP server.
+3. The MCP Server (server.py) receives the tool call and constructs a specific JSON command.
+4. The Ableton Remote Script (__init__.py), running inside Live, receives the JSON command via a socket connection.
+5. The Remote Script executes the command using the official Ableton Live API, making the change in your session instantly.
 
 ---
 
-## 🔧 Advanced Features
+## Advanced Features
 
 <details>
 <summary><strong>🚀 High-Performance Mode (UDP Server)</strong></summary>
+
 
 For real-time parameter control with ultra-low latency:
 
@@ -184,104 +170,94 @@ This demonstrates how to build:
 <details>
 <summary><strong>🎤 ElevenLabs Voice Integration</strong></summary>
 
-Generate professional voice content:
+
+This repository can be integrated with other MCP servers, such as one for ElevenLabs, to generate and import audio directly into your project.
+
+Set up the ElevenLabs MCP server according to its instructions.
+
+Update your AI assistant's config to include both servers.
+
+Example mcp-config.json:
 
 ```json
 {
   "mcpServers": {
+    "AbletonMCP": {
+      "command": "python",
+      "args": ["/path/to/ableton-mcp-extended/server.py"]
+    },
     "ElevenLabs": {
       "command": "python",
-      "args": ["path/to/elevenlabs_mcp/server.py"],
+      "args": ["/path/to/elevenlabs_mcp/server.py"],
       "env": {
-        "ELEVENLABS_API_KEY": "your-api-key"
+        "ELEVENLABS_API_KEY": "your-api-key-here"
       }
     }
   }
 }
 ```
 
-Try:
-- *"Generate a deep movie trailer voice saying 'In a world...'"*
-- *"Create a cheerful announcement for my podcast intro"*
-- *"Make a robotic voice explaining the breakdown section"*
 </details>
 
 ---
 
-## 💡 Examples & Inspiration
-
-### 🎵 **Complete Song Creation**
-*"Create a chill lo-fi hip-hop track with vinyl crackle, warm bass, and soft piano"*
-
-### 🎬 **Podcast Production**  
-*"Generate intro music, add a professional voice-over, and create smooth transitions"*
-
-### 🎮 **Game Music**
-*"Build an 8-bit style soundtrack with retro drums and chiptune melodies"*
-
-### 🎭 **Experimental Soundscapes**
-*"Create an ambient piece with evolving textures and spatial effects"*
-
----
-
-## 🛠️ Components Overview
+## Components Overview
 
 This project includes several specialized components:
 
-### 🖥️ **Core MCP Server**
+### **Core MCP Server**
 - Standard TCP communication for reliable AI control
-- Full Ableton Live API integration
-- Compatible with Claude Desktop and Cursor
+- Extensive Ableton Live API integration
+- Compatible with Claude Desktop, Cursor, and Gemini CLI.
 
-### ⚡ **Hybrid TCP/UDP Server** 
+### **Hybrid TCP/UDP Server** 
 - High-performance real-time parameter control
 - Ultra-low latency for live performance
 - Perfect for controllers and interactive tools
 
-### 🎤 **ElevenLabs Integration**
+### **ElevenLabs Integration**
 - Professional text-to-speech generation
 - Custom voice creation and cloning
 - Direct import into Ableton sessions
 - Real-time SFX generation
 
-### 🎮 **Experimental Tools & Examples**
+### **Experimental Tools & Examples**
 - **XY Mouse Controller**: Example demonstrating how to build custom Ableton controllers
 - **Extensible Framework**: Foundation for creating your own control interfaces
 - **Proof of Concept**: Shows the power and flexibility of the MCP approach
 
 ---
 
-## 📚 Documentation
+## Documentation
 
 - **[Installation Guide](INSTALLATION.md)** - Detailed setup instructions
 - **[User Guide](README.md)** - What, which, and how  
 
 ---
 
-## 🤝 Community & Support
+## Community & Support
 
 - **GitHub Issues**: Bug reports and feature requests
 - **Discussions**: Share your creations and get help
-- **Wiki**: Community-contributed tips and tricks
 
-### 🎬 **Share Your Creations**
-Tag us with your AI-generated music! We love seeing what the community creates.
+### **Share Your Creations**
+Tag us (@uisato_) with your AI-generated experiments! I love seeing what the community creates.
 
 ---
 
-## 🔮 What's Next
+## What's Next
 
 We're constantly improving Ableton MCP Extended:
 
-- 🎛️ **VST Plugin Support** - Control third-party plugins  
-- 🎼 **Arrangement View** - Full timeline control
-- 🎹 **Hardware Integration** - Bridge MIDI controllers through AI
-- 🤖 **Advanced AI** - Smarter music understanding and generation
-- 🌐 **Web Interface** - Browser-based control panel
+- **VST Plugin Support** - Control third-party plugins [Though it can be achieved throught the "Configure" button]
+- **Arrangement View** - Full timeline control
+- **Hardware Integration** - Bridge MIDI controllers through AI
+- **Advanced AI** - Smarter and better music understanding and generation
+- **Fixing automation points** -
 
 ---
 
-## 📄 License & Credits
+## License & Credits
 
 This project is licensed under the MIT License - see [LICENSE](LICENSE) for details.
 
@@ -291,14 +267,6 @@ This project is licensed under the MIT License - see [LICENSE](LICENSE) for deta
 - [Ableton Live](https://www.ableton.com) - Digital audio workstation
 
 **Inspired by:** The original [ableton-mcp](https://github.com/ahujasid/ableton-mcp) project
-
----
-
-## 🚀 Ready to Transform Your Music Production?
-
-**[⬇️ Get Started Now](#-quick-start-5-minutes)** | **[📖 Read the Docs](INSTALLATION.md)** | **[🎵 See Examples](docs/EXAMPLES.md)**
-
-*Transform your creative process. Make music through conversation. Welcome to the future of music production.*
 
 ---
 
