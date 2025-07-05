@@ -254,7 +254,7 @@ Tag me with your AI-generated experiments! I love seeing what the community crea
 
 We're constantly improving Ableton MCP Extended:
 
-- **Fixing automation points bugs**
+- **Fixing Automation Point Placement Bugs**
 - **VST Plugin Support** - Control third-party plugins [Though it can be achieved throught the "Configure" button]
 - **Arrangement View** - Full timeline control
 - **Hardware Integration** - Bridge MIDI controllers through AI
