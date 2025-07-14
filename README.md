@@ -7,6 +7,8 @@
 
 ---
 
+Video demonstration: https://www.youtube.com/watch?v=7ZKPIrJuuKk
+
 This tool is designed for producers, developers, and AI enthusiasts who want to streamline their music production workflow, experiment with generative music, and build custom integrations with Ableton Live.
 
 **You can transform this conversation:**
