@@ -116,7 +116,7 @@ pip install -e .
 **For Cursor:**
 Add MCP server in Settings → MCP with the same path.
 
-### 5. **Start Creating! **
+### 5. **Start Creating!** 
 Open your AI assistant and try:
 - *"Create a new MIDI track with a piano"*
 - *"Add a simple drum beat"*
