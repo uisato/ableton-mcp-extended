@@ -65,6 +65,13 @@ This project provides comprehensive, programmatic control over the Ableton Live 
     * Sound Effects: Create custom SFX with AI
     * Direct Import: Generated audio appears instantly in your Ableton session
 
+* **AI Music Producer (NEW!)** 
+    * Complete Track Generation: Natural language to full professional arrangements
+    * Style Intelligence: Deep understanding of genres and artist signatures
+    * Stock Plugin Mastery: Professional sounds using only Ableton's built-in tools
+    * Intelligent Arrangement: AI-powered song structure and transitions
+    * Real-time Guidance: Interactive chat with AI music production expert
+
 * **Extensible Framework for Custom Tools**
     * Example: XY Mouse Controller: Demonstrates creating custom Ableton controllers with the MCP framework
     * Ultra-Low Latency: High-performance UDP protocol enables responsive real-time control
@@ -121,6 +128,77 @@ Open your AI assistant and try:
 - *"Create a new MIDI track with a piano"*
 - *"Add a simple drum beat"*
 - *"What tracks do I currently have?"*
+
+---
+
+## 🎵 **AI Music Producer Extension** (NEW!)
+
+We've supercharged the system with **Google Gemini 2.5 Flash** to create an **AI Music Producer** that generates complete, professional tracks from simple requests!
+
+### **🚀 What It Does**
+
+Transform this simple request:
+```
+👤 "Create an Afro House track in the style of Black Coffee at 122 BPM"
+```
+
+Into a complete production plan:
+- **Style Analysis**: Deep understanding of Afro House characteristics
+- **Track Elements**: Kick, bass, hi-hats, percussion, vocal chops, pads
+- **Harmonic Progression**: Am - F - C - G (style-appropriate)
+- **Arrangement Plan**: Intro (32 bars) → Verse → Chorus → Breakdown → Outro
+- **Plugin Recommendations**: Specific Ableton stock plugin settings
+- **Mix Guidelines**: Professional mixing approach for the style
+
+### **🎨 Style Intelligence**
+
+The AI understands musical styles deeply:
+- **Afro House**: Black Coffee, organic percussion, warm basslines
+- **Keinemusik Style**: Sophisticated deep house, vintage electric pianos  
+- **Progressive House**: Eric Prydz, epic builds, emotional breakdowns
+- **Deep House**: Dixon, jazz influences, vintage warmth
+- **Tech House**: Punchy, tribal elements, rolling basslines
+
+### **🛠️ Stock Plugin Mastery**
+
+Professional sounds using only Ableton's built-in tools:
+- **Wavetable**: Advanced synthesis for leads, bass, and textures
+- **Bass**: Dedicated analog-style bass sounds
+- **Impulse**: Complete drum programming
+- **Effect Chains**: Professional processing templates
+
+### **Quick Start with AI Producer**
+
+1. **Set your Google AI API key:**
+```bash
+export GOOGLE_AI_API_KEY="your-gemini-api-key"
+```
+
+2. **Install dependencies:**
+```bash
+pip install google-generativeai>=0.8.0 librosa pretty_midi
+```
+
+3. **Try the demo:**
+```bash
+python demo_ai_music_producer.py
+```
+
+4. **Use in your AI assistant:**
+```
+👤 "Generate a complete Afro House track inspired by Black Coffee"
+👤 "Create a Keinemusik-style deep house track with sophisticated chords"
+👤 "Make a progressive house anthem with epic builds"
+```
+
+### **Available AI Tools**
+
+- **`generate_complete_track`**: Complete track generation from description
+- **`create_afro_house_track`**: Specific Afro House generation
+- **`create_keinemusik_style_track`**: Sophisticated deep house
+- **`create_progressive_house_anthem`**: Epic progressive house
+- **`analyze_and_replicate_style`**: Analyze and recreate any style
+- **`chat_with_ai_producer`**: Interactive music production guidance
 
 ---
 
