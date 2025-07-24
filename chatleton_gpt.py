@@ -102,16 +102,25 @@ class ChatletonGPT:
             return False
     
     async def check_ableton_connection(self):
-        """Check if Ableton Live is connected"""
+        """Check if Ableton Live is connected using enhanced integration"""
         try:
-            # This would implement actual connection checking
-            # For now, simulate based on socket availability
-            import socket
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            result = sock.connect_ex(('localhost', 11999))
-            sock.close()
+            # Initialize enhanced Ableton integration if not already done
+            if not hasattr(self, 'ableton'):
+                from music_intelligence.ableton_integration import EnhancedAbletonIntegration
+                self.ableton = EnhancedAbletonIntegration()
+                
+                # Add status callback for real-time updates
+                self.ableton.add_status_callback(self._on_ableton_status_change)
             
-            self.ableton_connected = (result == 0)
+            # Test connection
+            test_results = await self.ableton.test_connection()
+            self.ableton_connected = test_results.get("command_test", False)
+            
+            if self.ableton_connected:
+                logger.info(f"✅ Ableton Live connected - {self.ableton.get_session_summary()['track_count']} tracks")
+            else:
+                logger.info("⚠️ Ableton Live not connected")
+                
             return self.ableton_connected
             
         except Exception as e:
@@ -157,35 +166,60 @@ class ChatletonGPT:
                 "actions": []
             }
             
-            # If it's a generation request and Ableton is connected, prepare actions
+            # If it's a generation request and Ableton is connected, actually generate!
             if is_generation_request and self.ableton_connected:
                 try:
                     # Analyze the request for actionable items
                     analysis = await self.orchestrator.analyze_user_request(message)
                     
+                    # Create creative brief
+                    brief = await self.orchestrator.create_creative_brief(analysis)
+                    
+                    # Actually generate the track in Ableton!
+                    generation_actions = await self._generate_track_in_ableton(brief, analysis)
+                    
+                    # Prepare response with real actions
                     actions = [
                         {
-                            "type": "set_bpm",
-                            "value": analysis.get("bpm", 120),
-                            "description": f"Set BPM to {analysis.get('bpm', 120)}"
+                            "type": "track_generated",
+                            "value": len(generation_actions),
+                            "description": f"Generated {brief.style} track with {len(generation_actions)} actions"
                         },
                         {
-                            "type": "set_key", 
-                            "value": analysis.get("key", "C"),
-                            "description": f"Set key to {analysis.get('key', 'C')}"
-                        },
-                        {
-                            "type": "notification",
-                            "value": f"Ready to create {analysis.get('style', 'track')} track!",
-                            "description": "AI analysis complete"
+                            "type": "ableton_updated",
+                            "value": f"{brief.bpm} BPM, {brief.key} key",
+                            "description": f"Set project to {brief.bpm} BPM in {brief.key}"
                         }
                     ]
                     
+                    # Add individual actions
+                    for action in generation_actions[-3:]:  # Show last 3 actions
+                        actions.append({
+                            "type": "generation_step",
+                            "value": action.action_type,
+                            "description": action.description
+                        })
+                    
                     response["actions"] = actions
-                    response["analysis"] = analysis
+                    response["analysis"] = {
+                        "style": brief.style,
+                        "bpm": brief.bpm,
+                        "key": brief.key,
+                        "mood": analysis.get("mood", "Unknown"),
+                        "track_elements": brief.track_elements,
+                        "actions_performed": len(generation_actions)
+                    }
+                    response["generation_complete"] = True
                     
                 except Exception as e:
-                    logger.error(f"Error analyzing request: {e}")
+                    logger.error(f"Error generating track: {e}")
+                    response["actions"] = [
+                        {
+                            "type": "error",
+                            "value": str(e),
+                            "description": f"Generation failed: {str(e)}"
+                        }
+                    ]
             
             # Add to chat history
             self.chat_history.append(response)
@@ -205,7 +239,7 @@ class ChatletonGPT:
     
     async def get_status(self) -> Dict[str, Any]:
         """Get current status of Chat-leton GPT"""
-        return {
+        status = {
             "name": self.name,
             "version": self.version,
             "session_id": self.session_id,
@@ -216,6 +250,63 @@ class ChatletonGPT:
             "available_styles": self.style_analyzer.list_available_styles() if self.style_analyzer else [],
             "timestamp": datetime.now().isoformat()
         }
+        
+        # Add Ableton session info if connected
+        if self.ableton_connected and hasattr(self, 'ableton'):
+            try:
+                ableton_info = self.ableton.get_session_summary()
+                status["ableton_session"] = ableton_info
+                status["ableton_status"] = self.ableton.get_connection_info()
+            except Exception as e:
+                logger.debug(f"Error getting Ableton status: {e}")
+        
+        return status
+    
+    async def _generate_track_in_ableton(self, brief, analysis) -> List:
+        """Generate a track in Ableton Live using the enhanced integration"""
+        if not hasattr(self, 'ableton'):
+            raise Exception("Ableton integration not initialized")
+        
+        logger.info(f"🎵 Generating {brief.style} track in Ableton Live")
+        
+        # Convert brief to format expected by enhanced integration
+        generation_brief = {
+            "style": brief.style,
+            "bpm": brief.bpm,
+            "key": brief.key,
+            "track_elements": brief.track_elements,
+            "length_minutes": brief.arrangement_length
+        }
+        
+        # Progress callback for real-time feedback
+        def progress_callback(message: str, progress: float):
+            logger.info(f"🎛️ Generation progress ({progress*100:.0f}%): {message}")
+        
+        # Generate the track
+        actions = await self.ableton.generate_track_from_brief(generation_brief, progress_callback)
+        
+        logger.info(f"✅ Track generation complete: {len(actions)} actions performed")
+        return actions
+    
+    def _on_ableton_status_change(self, status, state):
+        """Callback for Ableton connection status changes"""
+        try:
+            from music_intelligence.ableton_integration import ConnectionStatus
+            
+            if status == ConnectionStatus.CONNECTED:
+                self.ableton_connected = True
+                logger.info(f"🎛️ Ableton connected: {state.track_count} tracks, {state.tempo} BPM")
+            elif status == ConnectionStatus.DISCONNECTED:
+                self.ableton_connected = False
+                logger.info("🔌 Ableton disconnected")
+            elif status == ConnectionStatus.ERROR:
+                self.ableton_connected = False
+                logger.warning("❌ Ableton connection error")
+            elif status == ConnectionStatus.RECONNECTING:
+                logger.info("🔄 Ableton reconnecting...")
+                
+        except Exception as e:
+            logger.error(f"Error in Ableton status callback: {e}")
     
     # ========================================================================
     # INTERFACE IMPLEMENTATIONS

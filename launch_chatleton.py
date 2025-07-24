@@ -54,13 +54,14 @@ def show_menu():
     print("4. 🔌 MCP Server Mode (For Claude/Cursor)")
     print("5. 🧪 Run Demo")
     print("6. 🔧 Test Installation")
+    print("7. 🎛️ Test Ableton Integration")
     print("0. ❌ Exit")
     
     while True:
-        choice = input("\n🎤 Your choice (0-6): ").strip()
-        if choice in ['0', '1', '2', '3', '4', '5', '6']:
+        choice = input("\n🎤 Your choice (0-7): ").strip()
+        if choice in ['0', '1', '2', '3', '4', '5', '6', '7']:
             return choice
-        print("❌ Invalid choice. Please enter 0-6.")
+        print("❌ Invalid choice. Please enter 0-7.")
 
 def launch_interface(choice):
     """Launch the selected interface"""
@@ -98,6 +99,25 @@ def launch_interface(choice):
     elif choice == '6':
         print("🚀 Testing installation...")
         subprocess.run([sys.executable, str(project_root / "test_ai_producer.py")])
+    
+    elif choice == '7':
+        print("🚀 Testing Ableton integration...")
+        # Ask for test type
+        print("\n🎛️ Ableton Integration Test Options:")
+        print("a. 🚀 Quick connection test")
+        print("b. 🔧 Full test suite")
+        print("c. 💬 Interactive test with setup checks")
+        
+        test_choice = input("\nChoose test type (a/b/c): ").strip().lower()
+        
+        if test_choice == 'a':
+            subprocess.run([sys.executable, str(project_root / "test_ableton_integration.py"), "--quick"])
+        elif test_choice == 'b':
+            subprocess.run([sys.executable, str(project_root / "test_ableton_integration.py")])
+        elif test_choice == 'c':
+            subprocess.run([sys.executable, str(project_root / "test_ableton_integration.py"), "--interactive"])
+        else:
+            print("❌ Invalid test choice")
     
     elif choice == '0':
         print("👋 Goodbye!")

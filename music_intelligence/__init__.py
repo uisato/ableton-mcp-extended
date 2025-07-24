@@ -14,9 +14,11 @@ __version__ = "1.0.0"
 from .gemini_orchestrator import GeminiOrchestrator
 from .style_analyzer import StyleAnalyzer
 from .stock_plugin_expert import StockPluginExpert
+from .ableton_integration import EnhancedAbletonIntegration
 
 __all__ = [
     "GeminiOrchestrator",
     "StyleAnalyzer", 
-    "StockPluginExpert"
+    "StockPluginExpert",
+    "EnhancedAbletonIntegration"
 ] 
