@@ -229,7 +229,10 @@ class AbletonMCP(ControlSurface):
             elif command_type in ["create_midi_track", "set_track_name", 
                                  "create_clip", "add_notes_to_clip", "set_clip_name", 
                                  "set_tempo", "fire_clip", "stop_clip",
-                                 "start_playback", "stop_playback", "load_browser_item"]:
+                                 "start_playback", "stop_playback", "load_browser_item",
+                                 "load_instrument_or_effect", "set_scale_device_parameters",
+                                 "get_device_parameters", "load_specific_drum_kit_by_name",
+                                 "load_specific_instrument_by_name"]:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
@@ -274,14 +277,30 @@ class AbletonMCP(ControlSurface):
                             result = self._start_playback()
                         elif command_type == "stop_playback":
                             result = self._stop_playback()
-                        elif command_type == "load_instrument_or_effect":
-                            track_index = params.get("track_index", 0)
-                            uri = params.get("uri", "")
-                            result = self._load_instrument_or_effect(track_index, uri)
                         elif command_type == "load_browser_item":
                             track_index = params.get("track_index", 0)
                             item_uri = params.get("item_uri", "")
                             result = self._load_browser_item(track_index, item_uri)
+                        elif command_type == "load_instrument_or_effect":
+                            track_index = params.get("track_index", 0)
+                            uri = params.get("uri", "")
+                            result = self._load_instrument_or_effect(track_index, uri)
+                        elif command_type == "set_scale_device_parameters":
+                            track_index = params.get("track_index", 0)
+                            scale_params = params.get("parameters", {})
+                            result = self._set_scale_device_parameters(track_index, scale_params)
+                        elif command_type == "get_device_parameters":
+                            track_index = params.get("track_index", 0)
+                            device_index = params.get("device_index", 0)
+                            result = self._get_device_parameters(track_index, device_index)
+                        elif command_type == "load_specific_drum_kit_by_name":
+                            track_index = params.get("track_index", 0)
+                            kit_name = params.get("kit_name", "")
+                            result = self._load_specific_drum_kit_by_name(track_index, kit_name)
+                        elif command_type == "load_specific_instrument_by_name":
+                            track_index = params.get("track_index", 0)
+                            instrument_name = params.get("instrument_name", "")
+                            result = self._load_specific_instrument_by_name(track_index, instrument_name)
                         
                         # Put the result in the queue
                         response_queue.put({"status": "success", "result": result})
@@ -320,12 +339,10 @@ class AbletonMCP(ControlSurface):
                 item_type = params.get("item_type", "all")
                 response["result"] = self._get_browser_items(path, item_type)
             # Add the new browser commands
-            elif command_type == "get_browser_tree":
-                category_type = params.get("category_type", "all")
-                response["result"] = self.get_browser_tree(category_type)
             elif command_type == "get_browser_items_at_path":
-                path = params.get("path", "")
-                response["result"] = self.get_browser_items_at_path(path)
+                response["result"] = self._get_browser_items_at_path(params.get("path", ""))
+            elif command_type == "get_browser_tree":
+                response["result"] = self._get_browser_tree(params.get("category_type", "all"))
             else:
                 response["status"] = "error"
                 response["message"] = "Unknown command: " + command_type
@@ -414,21 +431,22 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error getting track info: " + str(e))
             raise
     
-    def _create_midi_track(self, index):
-        """Create a new MIDI track at the specified index"""
+    def _create_midi_track(self, index=-1):
+        """Create a new MIDI track"""
         try:
-            # Create the track
-            self._song.create_midi_track(index)
-            
-            # Get the new track
-            new_track_index = len(self._song.tracks) - 1 if index == -1 else index
-            new_track = self._song.tracks[new_track_index]
+            if index == -1:
+                # Add at the end
+                track = self._song.create_midi_track(-1)
+            else:
+                # Insert at specific position
+                track = self._song.create_midi_track(index)
             
             result = {
-                "index": new_track_index,
-                "name": new_track.name
+                "name": track.name,
+                "index": list(self._song.tracks).index(track)
             }
             return result
+             
         except Exception as e:
             self.log_message("Error creating MIDI track: " + str(e))
             raise
@@ -453,7 +471,7 @@ class AbletonMCP(ControlSurface):
             raise
     
     def _create_clip(self, track_index, clip_index, length):
-        """Create a new MIDI clip in the specified track and clip slot"""
+        """Create a new MIDI clip with proper length setting"""
         try:
             if track_index < 0 or track_index >= len(self._song.tracks):
                 raise IndexError("Track index out of range")
@@ -465,18 +483,34 @@ class AbletonMCP(ControlSurface):
             
             clip_slot = track.clip_slots[clip_index]
             
-            # Check if the clip slot already has a clip
             if clip_slot.has_clip:
-                raise Exception("Clip slot already has a clip")
+                # Delete existing clip
+                clip_slot.delete_clip()
             
-            # Create the clip
+            # Create new clip with proper length
             clip_slot.create_clip(length)
+            clip = clip_slot.clip
             
-            result = {
-                "name": clip_slot.clip.name,
-                "length": clip_slot.clip.length
-            }
-            return result
+            if clip:
+                # CRITICAL FIX: Set loop_end to ensure full clip plays
+                clip.loop_end = length
+                clip.loop_start = 0
+                
+                # Set clip to loop
+                clip.looping = True
+                
+                self.log_message(f"Created clip with length {length} bars, loop_end set to {clip.loop_end}")
+                
+                return {
+                    "name": clip.name,
+                    "length": clip.length,
+                    "loop_end": clip.loop_end,
+                    "loop_start": clip.loop_start,
+                    "looping": clip.looping
+                }
+            else:
+                raise Exception("Failed to create clip")
+                
         except Exception as e:
             self.log_message("Error creating clip: " + str(e))
             raise
@@ -799,6 +833,29 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error finding browser item by URI: {0}".format(str(e)))
             return None
     
+    def _get_loadable_items_recursive(self, browser_item, max_depth=3, current_depth=0):
+        """Recursively get all loadable items from a browser category"""
+        loadable_items = []
+        
+        if current_depth > max_depth:
+            return loadable_items
+            
+        try:
+            # Check if current item is loadable
+            if hasattr(browser_item, 'is_loadable') and browser_item.is_loadable:
+                loadable_items.append(browser_item)
+            
+            # Recursively search children
+            if hasattr(browser_item, 'children') and browser_item.children:
+                for child in browser_item.children:
+                    child_items = self._get_loadable_items_recursive(child, max_depth, current_depth + 1)
+                    loadable_items.extend(child_items)
+                    
+        except Exception as e:
+            self.log_message("Error getting loadable items: {0}".format(str(e)))
+            
+        return loadable_items
+    
     # Helper methods
     
     def _get_device_type(self, device):
@@ -1060,3 +1117,472 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error getting browser items at path: {0}".format(str(e)))
             self.log_message(traceback.format_exc())
             raise
+    
+    def _load_instrument_or_effect(self, track_index, uri):
+        """Load an instrument or effect onto a track using a browser URI"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            
+            track = self._song.tracks[track_index]
+            
+            # For simplicity, let's implement basic instrument loading based on URI
+            if "drum" in uri.lower() or "kit" in uri.lower():
+                # Load basic drum rack
+                result = self._load_drum_rack(track)
+                result["uri"] = uri
+                return result
+            elif "bass" in uri.lower():
+                # Load Wavetable for bass
+                result = self._load_wavetable_bass(track)
+                result["uri"] = uri
+                return result
+            else:
+                # Load basic Wavetable synth
+                result = self._load_wavetable_synth(track)
+                result["uri"] = uri
+                return result
+                
+        except Exception as e:
+            self.log_message("Error loading instrument: " + str(e))
+            return {"loaded": False, "error": str(e), "uri": uri}
+    
+    def _load_drum_rack(self, track):
+        """Load a basic drum rack using browser API"""
+        try:
+            # Select the track first
+            self._song.view.selected_track = track
+            
+            # Access browser and find drum rack
+            app = self.application()
+            browser = app.browser
+            
+            self.log_message(f"Attempting to load drum rack. Browser available: {browser is not None}")
+            
+            # Navigate to drums category and load drum rack
+            if hasattr(browser, 'drums') and browser.drums:
+                self.log_message("Found browser.drums category")
+                # Find the first loadable drum rack
+                drum_items = self._get_loadable_items_recursive(browser.drums)
+                self.log_message(f"Found {len(drum_items)} drum items: {[item.name for item in drum_items[:5]]}")
+                
+                for item in drum_items:
+                    if "drum rack" in item.name.lower() or "impulse" in item.name.lower():
+                        app.browser.load_item(item)
+                        self.log_message("Loaded Drum Rack on track: " + track.name)
+                        return {"loaded": True, "type": "drum_rack"}
+                        
+                # If no specific drum rack found, try any drum-related item
+                if drum_items:
+                    app.browser.load_item(drum_items[0])
+                    self.log_message(f"Loaded first drum item '{drum_items[0].name}' on track: " + track.name)
+                    return {"loaded": True, "type": "drum_rack"}
+            else:
+                self.log_message("No browser.drums category found")
+            
+            # Fallback: try to load from instruments
+            if hasattr(browser, 'instruments') and browser.instruments:
+                self.log_message("Trying instruments category for drum rack")
+                instrument_items = self._get_loadable_items_recursive(browser.instruments)
+                self.log_message(f"Found {len(instrument_items)} instrument items")
+                
+                for item in instrument_items:
+                    if "drum" in item.name.lower() or "kit" in item.name.lower():
+                        app.browser.load_item(item)
+                        self.log_message("Loaded Drum instrument from instruments on track: " + track.name)
+                        return {"loaded": True, "type": "drum_rack"}
+                        
+                # If no drums found, try loading Impulse if available
+                for item in instrument_items:
+                    if "impulse" in item.name.lower():
+                        app.browser.load_item(item)
+                        self.log_message("Loaded Impulse on track: " + track.name)
+                        return {"loaded": True, "type": "drum_rack"}
+            
+            # If we can't find a drum rack, just indicate failure
+            self.log_message("Could not find any drum-related instruments")
+            return {"loaded": False, "type": "drum_rack", "message": "No drum instruments found"}
+                
+        except Exception as e:
+            self.log_message("Error loading drum rack: " + str(e))
+            return {"loaded": False, "error": str(e)}
+    
+    def _load_wavetable_bass(self, track):
+        """Load Wavetable synth using browser API"""
+        try:
+            # Select the track first
+            self._song.view.selected_track = track
+            
+            # Access browser and find wavetable
+            app = self.application()
+            browser = app.browser
+            
+            self.log_message(f"Attempting to load bass instrument. Browser available: {browser is not None}")
+            
+            # Look for Wavetable in instruments
+            if hasattr(browser, 'instruments') and browser.instruments:
+                self.log_message("Found browser.instruments category")
+                instrument_items = self._get_loadable_items_recursive(browser.instruments)
+                self.log_message(f"Found {len(instrument_items)} instrument items: {[item.name for item in instrument_items[:5]]}")
+                
+                # Try to find Wavetable specifically
+                for item in instrument_items:
+                    if "wavetable" in item.name.lower():
+                        app.browser.load_item(item)
+                        self.log_message("Loaded Wavetable Bass on track: " + track.name)
+                        return {"loaded": True, "type": "wavetable_bass"}
+                
+                # Fallback to bass-specific instruments
+                for item in instrument_items:
+                    if "bass" in item.name.lower():
+                        app.browser.load_item(item)
+                        self.log_message(f"Loaded bass instrument '{item.name}' on track: " + track.name)
+                        return {"loaded": True, "type": "bass_synth"}
+                        
+                # Fallback to any synth instrument  
+                for item in instrument_items:
+                    if "synth" in item.name.lower() or "instrument" in item.name.lower():
+                        app.browser.load_item(item)
+                        self.log_message(f"Loaded synth '{item.name}' as bass on track: " + track.name)
+                        return {"loaded": True, "type": "synth_bass"}
+                        
+                # Last resort: load first available instrument
+                if instrument_items:
+                    app.browser.load_item(instrument_items[0])
+                    self.log_message(f"Loaded first available instrument '{instrument_items[0].name}' as bass on track: " + track.name)
+                    return {"loaded": True, "type": "generic_bass"}
+            else:
+                self.log_message("No browser.instruments category found")
+                        
+            self.log_message("Could not find any bass instruments")
+            return {"loaded": False, "type": "wavetable_bass", "message": "No suitable bass instrument found"}
+                
+        except Exception as e:
+            self.log_message("Error loading wavetable bass: " + str(e))
+            return {"loaded": False, "error": str(e)}
+    
+    def _load_wavetable_synth(self, track):
+        """Load basic Wavetable synth using browser API"""
+        try:
+            # Select the track first
+            self._song.view.selected_track = track
+            
+            # Access browser and find wavetable
+            app = self.application()
+            browser = app.browser
+            
+            self.log_message(f"Attempting to load synth instrument. Browser available: {browser is not None}")
+            
+            # Look for Wavetable in instruments
+            if hasattr(browser, 'instruments') and browser.instruments:
+                self.log_message("Found browser.instruments category")
+                instrument_items = self._get_loadable_items_recursive(browser.instruments)
+                self.log_message(f"Found {len(instrument_items)} instrument items: {[item.name for item in instrument_items[:5]]}")
+                
+                # Try to find Wavetable specifically
+                for item in instrument_items:
+                    if "wavetable" in item.name.lower():
+                        app.browser.load_item(item)
+                        self.log_message("Loaded Wavetable Synth on track: " + track.name)
+                        return {"loaded": True, "type": "wavetable_synth"}
+                        
+                # Fallback to any synth
+                for item in instrument_items:
+                    if "synth" in item.name.lower() and "bass" not in item.name.lower():
+                        app.browser.load_item(item)
+                        self.log_message(f"Loaded synth '{item.name}' on track: " + track.name)
+                        return {"loaded": True, "type": "synth"}
+                        
+                # Fallback to any instrument except drums
+                for item in instrument_items:
+                    if "drum" not in item.name.lower() and "kit" not in item.name.lower():
+                        app.browser.load_item(item)
+                        self.log_message(f"Loaded instrument '{item.name}' as synth on track: " + track.name)
+                        return {"loaded": True, "type": "generic_synth"}
+                        
+                # Last resort: load first available instrument
+                if instrument_items:
+                    app.browser.load_item(instrument_items[0])
+                    self.log_message(f"Loaded first available instrument '{instrument_items[0].name}' as synth on track: " + track.name)
+                    return {"loaded": True, "type": "fallback_synth"}
+            else:
+                self.log_message("No browser.instruments category found")
+                        
+            self.log_message("Could not find any synth instruments")
+            return {"loaded": False, "type": "wavetable_synth", "message": "No suitable synth instrument found"}
+                
+        except Exception as e:
+            self.log_message("Error loading wavetable synth: " + str(e))
+            return {"loaded": False, "error": str(e)}
+    
+    def _set_scale_device_parameters(self, track_index, parameters):
+        """Set Scale device parameters to enforce scale constraints"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            
+            track = self._song.tracks[track_index]
+            
+            # Find Scale device on the track
+            scale_device = None
+            for device in track.devices:
+                if device.class_name == "MidiScale" or "Scale" in device.name:
+                    scale_device = device
+                    break
+                    
+            if not scale_device:
+                # Try to load Scale device first
+                self._song.view.selected_track = track
+                app = self.application()
+                
+                # Find Scale device in browser
+                if hasattr(app, 'browser') and app.browser:
+                    if hasattr(app.browser, 'midi_effects'):
+                        scale_items = self._get_loadable_items_recursive(app.browser.midi_effects)
+                        for item in scale_items:
+                            if "scale" in item.name.lower():
+                                app.browser.load_item(item)
+                                # Get the newly loaded device
+                                scale_device = track.devices[-1] if track.devices else None
+                                break
+                                
+            if scale_device:
+                # Set Scale device parameters
+                self.log_message(f"Setting Scale device parameters: {parameters}")
+                
+                param_results = {}
+                for param_name, value in parameters.items():
+                    try:
+                        # Find parameter by name
+                        for param in scale_device.parameters:
+                            if param_name.lower() in param.name.lower():
+                                # Convert parameter value to proper range
+                                if param_name.lower() == "base":
+                                    # Base note (0-11 for C-B)
+                                    param.value = value % 12
+                                elif param_name.lower() == "scale":
+                                    # Scale type (varies by device)
+                                    param.value = value
+                                else:
+                                    # General parameter
+                                    param.value = max(param.min, min(param.max, value))
+                                    
+                                param_results[param_name] = {
+                                    "set_value": param.value,
+                                    "min": param.min,
+                                    "max": param.max,
+                                    "name": param.name
+                                }
+                                self.log_message(f"Set {param.name} to {param.value}")
+                                break
+                    except Exception as e:
+                        param_results[param_name] = {"error": str(e)}
+                        self.log_message(f"Error setting parameter {param_name}: {e}")
+                        
+                return {
+                    "device_found": True,
+                    "device_name": scale_device.name,
+                    "parameters_set": param_results
+                }
+            else:
+                return {
+                    "device_found": False,
+                    "error": "Scale device not found and could not be loaded"
+                }
+                
+        except Exception as e:
+            self.log_message(f"Error setting scale device parameters: {e}")
+            return {"device_found": False, "error": str(e)}
+            
+    def _get_device_parameters(self, track_index, device_index):
+        """Get all parameters for a specific device"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            
+            track = self._song.tracks[track_index]
+            
+            if device_index < 0 or device_index >= len(track.devices):
+                raise IndexError("Device index out of range")
+            
+            device = track.devices[device_index]
+            
+            parameters = []
+            for i, param in enumerate(device.parameters):
+                param_info = {
+                    "index": i,
+                    "name": param.name,
+                    "value": param.value,
+                    "min": param.min,
+                    "max": param.max,
+                    "is_enabled": param.is_enabled,
+                    "automation_state": param.automation_state
+                }
+                parameters.append(param_info)
+                
+            return {
+                "device_name": device.name,
+                "device_class": device.class_name,
+                "parameters": parameters
+            }
+            
+        except Exception as e:
+            self.log_message(f"Error getting device parameters: {e}")
+            return {"error": str(e)}
+
+    def _load_specific_drum_kit_by_name(self, track_index, kit_name):
+        """Load a specific drum kit by its exact name"""
+        try:
+            if track_index >= len(self._song.tracks):
+                return {"status": "error", "error": f"Track index {track_index} out of range"}
+            
+            track = self._song.tracks[track_index]
+            self._song.view.selected_track = track
+            
+            # Get browser and find the specific drum kit
+            app = self.application()
+            browser = app.browser
+            
+            if hasattr(browser, 'drums') and browser.drums:
+                drum_items = self._get_loadable_items_recursive(browser.drums)
+                
+                # Find the specific kit
+                target_kit = None
+                for item in drum_items:
+                    if hasattr(item, 'name') and item.name.lower() == kit_name.lower():
+                        target_kit = item
+                        break
+                
+                if target_kit and hasattr(target_kit, 'is_loadable') and target_kit.is_loadable:
+                    browser.load_item(target_kit)
+                    self.log_message(f"Loaded specific drum kit '{kit_name}' on track {track_index}")
+                    return {
+                        "status": "success", 
+                        "kit_name": kit_name,
+                        "track_index": track_index,
+                        "loaded": True
+                    }
+                else:
+                    return {
+                        "status": "error",
+                        "error": f"Drum kit '{kit_name}' not found or not loadable"
+                    }
+            else:
+                return {"status": "error", "error": "Drums browser category not available"}
+                
+        except Exception as e:
+            self.log_message(f"Error loading specific drum kit '{kit_name}': {e}")
+            return {"status": "error", "error": str(e)}
+
+    def _load_specific_instrument_by_name(self, track_index, instrument_name):
+        """Load a specific instrument by its exact name"""
+        try:
+            if track_index >= len(self._song.tracks):
+                return {"status": "error", "error": f"Track index {track_index} out of range"}
+            
+            track = self._song.tracks[track_index]
+            self._song.view.selected_track = track
+            
+            # Get browser and find the specific instrument
+            app = self.application()
+            browser = app.browser
+            
+            if hasattr(browser, 'instruments') and browser.instruments:
+                instrument_items = self._get_loadable_items_recursive(browser.instruments)
+                
+                # Find the specific instrument
+                target_instrument = None
+                for item in instrument_items:
+                    if hasattr(item, 'name') and item.name.lower() == instrument_name.lower():
+                        target_instrument = item
+                        break
+                
+                if target_instrument and hasattr(target_instrument, 'is_loadable') and target_instrument.is_loadable:
+                    browser.load_item(target_instrument)
+                    self.log_message(f"Loaded specific instrument '{instrument_name}' on track {track_index}")
+                    return {
+                        "status": "success",
+                        "instrument_name": instrument_name,
+                        "track_index": track_index,
+                        "loaded": True
+                    }
+                else:
+                    return {
+                        "status": "error", 
+                        "error": f"Instrument '{instrument_name}' not found or not loadable"
+                    }
+            else:
+                return {"status": "error", "error": "Instruments browser category not available"}
+                
+        except Exception as e:
+            self.log_message(f"Error loading specific instrument '{instrument_name}': {e}")
+            return {"status": "error", "error": str(e)}
+
+    def _get_browser_items_at_path(self, path):
+        """Get browser items at a specific path"""
+        try:
+            app = self.application()
+            browser = app.browser
+            
+            if path == 'instruments' and hasattr(browser, 'instruments'):
+                return self._serialize_browser_item(browser.instruments)
+            elif path == 'drums' and hasattr(browser, 'drums'):
+                return self._serialize_browser_item(browser.drums)
+            elif path == 'sounds' and hasattr(browser, 'sounds'):
+                return self._serialize_browser_item(browser.sounds)
+            else:
+                return {"status": "error", "error": f"Browser path '{path}' not found"}
+                
+        except Exception as e:
+            self.log_message(f"Error getting browser items at path '{path}': {e}")
+            return {"status": "error", "error": str(e)}
+
+    def _get_browser_tree(self, category_type):
+        """Get the browser tree structure"""
+        try:
+            app = self.application()
+            browser = app.browser
+            
+            categories = []
+            if hasattr(browser, 'instruments'):
+                categories.append({"name": "Instruments", "uri": "query:Synths"})
+            if hasattr(browser, 'sounds'):
+                categories.append({"name": "Sounds", "uri": "query:Sounds"})
+            if hasattr(browser, 'drums'):
+                categories.append({"name": "Drums", "uri": "query:Drums"})
+            
+            return {"status": "success", "categories": categories}
+            
+        except Exception as e:
+            self.log_message(f"Error getting browser tree: {e}")
+            return {"status": "error", "error": str(e)}
+
+    def _serialize_browser_item(self, item):
+        """Serialize a browser item for JSON response"""
+        try:
+            result = {
+                "name": getattr(item, 'name', 'Unknown'),
+                "uri": getattr(item, 'uri', ''),
+                "is_folder": getattr(item, 'is_folder', False),
+                "is_device": getattr(item, 'is_device', False),
+                "is_loadable": getattr(item, 'is_loadable', False)
+            }
+            
+            # Get children if it's a folder
+            if hasattr(item, 'children') and item.children:
+                result["items"] = []
+                for child in item.children:
+                    child_data = {
+                        "name": getattr(child, 'name', 'Unknown'),
+                        "uri": getattr(child, 'uri', ''),
+                        "is_folder": getattr(child, 'is_folder', False),
+                        "is_device": getattr(child, 'is_device', False),
+                        "is_loadable": getattr(child, 'is_loadable', False)
+                    }
+                    result["items"].append(child_data)
+            
+            return result
+            
+        except Exception as e:
+            self.log_message(f"Error serializing browser item: {e}")
+            return {"status": "error", "error": str(e)}

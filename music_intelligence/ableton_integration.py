@@ -46,12 +46,14 @@ class AbletonState:
 
 @dataclass
 class GenerationAction:
-    """Represents an action to be performed in Ableton"""
+    """Represents a music generation action"""
     action_type: str
     params: Dict[str, Any]
     description: str
-    estimated_duration: float = 1.0
-    callback: Optional[Callable] = None
+    timestamp: datetime = field(default_factory=datetime.now)
+    estimated_duration: float = 0.0
+    actual_duration: float = 0.0
+    status: str = "pending"  # pending, executing, completed, failed
 
 
 class EnhancedAbletonIntegration:
@@ -59,13 +61,17 @@ class EnhancedAbletonIntegration:
     Enhanced Ableton Live integration with real-time monitoring and generation
     """
     
-    def __init__(self, host: str = "localhost", port: int = 11999):
+    def __init__(self, host: str = "localhost", port: int = 9877):
         """Initialize the enhanced Ableton integration"""
         self.host = host
         self.port = port
         self.sock: Optional[socket.socket] = None
         self.status = ConnectionStatus.DISCONNECTED
         self.state = AbletonState()
+        
+        # Socket access control
+        self.socket_lock = threading.Lock()
+        self.command_in_progress = False
         
         # Monitoring and feedback
         self.monitoring_active = False
@@ -195,7 +201,7 @@ class EnhancedAbletonIntegration:
     # ========================================================================
     
     async def _send_command_async(self, command_type: str, params: Dict[str, Any] = None, timeout: float = 15.0) -> Dict[str, Any]:
-        """Send command to Ableton asynchronously with timeout"""
+        """Send command to Ableton asynchronously with timeout and socket locking"""
         if not self.sock:
             raise ConnectionError("Not connected to Ableton")
         
@@ -204,58 +210,62 @@ class EnhancedAbletonIntegration:
             "params": params or {}
         }
         
-        try:
-            # Send command
-            command_json = json.dumps(command)
-            logger.debug(f"🎛️ Sending: {command_type}")
-            
-            self.sock.sendall(command_json.encode('utf-8'))
-            
-            # Set timeout and receive response
-            self.sock.settimeout(timeout)
-            
-            # Receive response in chunks
-            response_data = await self._receive_response_async()
-            
-            # Parse response
-            response = json.loads(response_data.decode('utf-8'))
-            
-            if response.get("status") == "error":
-                raise Exception(response.get("message", "Unknown Ableton error"))
-            
-            logger.debug(f"✅ Response: {command_type} success")
-            return response
-            
-        except socket.timeout:
-            logger.error(f"⏰ Timeout sending {command_type}")
-            raise Exception(f"Timeout executing {command_type}")
-        except Exception as e:
-            logger.error(f"❌ Error sending {command_type}: {e}")
-            raise Exception(f"Failed to execute {command_type}: {str(e)}")
-    
-    async def _receive_response_async(self, buffer_size: int = 8192) -> bytes:
-        """Receive complete response asynchronously"""
-        chunks = []
-        
-        while True:
-            chunk = self.sock.recv(buffer_size)
-            if not chunk:
-                break
-            
-            chunks.append(chunk)
-            
-            # Check if we have complete JSON
+        # Use socket lock to prevent conflicts with monitoring thread
+        with self.socket_lock:
+            self.command_in_progress = True
             try:
-                data = b''.join(chunks)
-                json.loads(data.decode('utf-8'))
-                return data
-            except json.JSONDecodeError:
-                continue
-        
-        if chunks:
-            return b''.join(chunks)
-        else:
-            raise Exception("No data received from Ableton")
+                # Send command
+                command_json = json.dumps(command)
+                logger.debug(f"🎛️ Sending: {command_type}")
+                
+                self.sock.sendall(command_json.encode('utf-8'))
+                
+                # Set timeout and receive response
+                self.sock.settimeout(timeout)
+                
+                # Receive complete response with better error handling
+                response_data = b''
+                start_time = time.time()
+                
+                while time.time() - start_time < timeout:
+                    try:
+                        chunk = self.sock.recv(8192)
+                        if not chunk:
+                            break
+                        response_data += chunk
+                        
+                        # Try to parse as complete JSON
+                        try:
+                            response = json.loads(response_data.decode('utf-8'))
+                            break
+                        except (json.JSONDecodeError, UnicodeDecodeError):
+                            continue
+                    except socket.timeout:
+                        continue
+                
+                if not response_data:
+                    raise Exception(f"No response received for {command_type}")
+                
+                # Parse final response
+                try:
+                    response = json.loads(response_data.decode('utf-8'))
+                except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                    logger.error(f"Invalid JSON response for {command_type}: {response_data[:200]}")
+                    raise Exception(f"Invalid response format for {command_type}")
+                
+                if response.get("status") == "error":
+                    raise Exception(response.get("message", "Unknown Ableton error"))
+                
+                logger.debug(f"✅ Response: {command_type} success")
+                return response
+                
+            except Exception as e:
+                logger.error(f"❌ Error sending {command_type}: {e}")
+                raise Exception(f"Failed to execute {command_type}: {str(e)}")
+            finally:
+                self.command_in_progress = False
+    
+
     
     # ========================================================================
     # HIGH-LEVEL MUSIC GENERATION
@@ -494,20 +504,24 @@ class EnhancedAbletonIntegration:
         """Background thread for monitoring Ableton state"""
         while self.monitoring_active:
             try:
-                if self.status == ConnectionStatus.CONNECTED and self.sock:
-                    # Get current session info
-                    response = self._send_command_sync("get_session_info")
-                    if response and response.get("status") == "success":
-                        asyncio.run(self._update_session_state(response.get("result", {})))
+                if self.status == ConnectionStatus.CONNECTED and self.sock and not self.command_in_progress:
+                    # Only monitor if no command is in progress
+                    if self.socket_lock.acquire(blocking=False):  # Non-blocking acquire
+                        try:
+                            response = self._send_command_sync("get_session_info")
+                            if response and response.get("status") == "success":
+                                asyncio.run(self._update_session_state(response.get("result", {})))
+                        finally:
+                            self.socket_lock.release()
                 
-                time.sleep(1.0)  # Check every second
+                time.sleep(3.0)  # Check every 3 seconds to be less aggressive
                 
             except Exception as e:
                 logger.debug(f"Monitor loop error: {e}")
-                time.sleep(2.0)  # Wait longer on error
+                time.sleep(5.0)  # Wait longer on error
     
     def _send_command_sync(self, command_type: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Synchronous version for background thread"""
+        """Synchronous version for background thread with improved timeout handling"""
         if not self.sock:
             return None
         
@@ -515,20 +529,26 @@ class EnhancedAbletonIntegration:
             command = {"type": command_type, "params": params or {}}
             self.sock.sendall(json.dumps(command).encode('utf-8'))
             
-            self.sock.settimeout(5.0)
-            chunks = []
+            self.sock.settimeout(3.0)  # Shorter timeout for monitoring
+            response_data = b''
+            start_time = time.time()
+            timeout = 3.0
             
-            while True:
-                chunk = self.sock.recv(4096)
-                if not chunk:
-                    break
-                chunks.append(chunk)
-                
+            while time.time() - start_time < timeout:
                 try:
-                    data = b''.join(chunks)
-                    return json.loads(data.decode('utf-8'))
-                except json.JSONDecodeError:
-                    continue
+                    chunk = self.sock.recv(4096)
+                    if not chunk:
+                        break
+                    response_data += chunk
+                    
+                    try:
+                        return json.loads(response_data.decode('utf-8'))
+                    except json.JSONDecodeError:
+                        continue
+                except socket.timeout:
+                    break
+                    
+            return None
                     
         except Exception:
             return None

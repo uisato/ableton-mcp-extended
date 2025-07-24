@@ -1,362 +1,433 @@
-# Ableton MCP Extended
-**Control Ableton Live using natural language via AI assistants like Claude or Cursor. This project provides a robust Model Context Protocol (MCP) server that translates natural language commands into precise actions within your Ableton Live session.**
+# Chat-leton GPT - AI Music Producer for Ableton Live
+**Your personal AI music production assistant powered by Google Gemini 2.5 Flash. Create complete, professional tracks from simple natural language requests - think "Suno for Ableton Live".**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Ableton Live 11+](https://img.shields.io/badge/Ableton%20Live-11+-orange.svg)](https://www.ableton.com/)
+[![Google Gemini](https://img.shields.io/badge/Powered%20by-Google%20Gemini%202.5%20Flash-blue.svg)](https://ai.google.dev/)
 
 ---
 
-Video demonstration: https://www.youtube.com/watch?v=7ZKPIrJuuKk
+## 🎵 **What is Chat-leton GPT?**
 
-This tool is designed for producers, developers, and AI enthusiasts who want to streamline their music production workflow, experiment with generative music, and build custom integrations with Ableton Live.
+Chat-leton GPT is a revolutionary AI music production assistant that transforms simple text requests into complete, professional tracks in Ableton Live. Unlike other AI music generators, it works **inside your DAW** using only **stock plugins**, making professional music production accessible to everyone.
 
-**You can transform this conversation:**
+**Transform this conversation:**
 ```
-👤 "Create a brief minimalist/neo-classical composition in a style similar to Ólafur Arnalds'. (Ableton MCP) / I've loaded four MIDI tracks called "Noire" and "Noire (2) ["Emotional Felt" presets], "Noire (2) ["Reversed Felt" preset, for ambient background], and "Noire (3) ["Ethereal Felt" preset, also for ambient background]. All loaded with nice piano instruments. You have also a MIDI track called "Strings" with a nice string ensemble instrument loaded. Feel free to add new instruments and effects, if pertinent."
-🤖 "Creating MIDI clips... Adding effects... Done!"
-👤 "Then, use ElevenLabs MCP to create a spoken-word audio clip (default voice and settings) with a relevant poem in the style of “Jim Morrison” to accompany the composition."  
-🤖 "Generating poem... Transforming it into speech... Importing it into your session... Done!"
+👤 "Create an Afro House track in the style of Black Coffee at 122 BPM"
+🤖 "Analyzing Afro House style... Creating track structure... 
+    Generating MIDI patterns... Setting up instruments...
+    Track created with 8 parts: kick, bass, hi-hats, percussion, 
+    vocal chops, organic pads, and atmospheric layers!"
 ```
 
-**Into this music production session**:
-
-https://github.com/user-attachments/assets/d6ef2de5-bdeb-4097-acc0-67d70f7f85b3
-
----
-
-## Key Features
-
-This project provides comprehensive, programmatic control over the Ableton Live environment.
-
-* **Session and Transport Control:**
-    * Start and stop playback.
-    * Get session info, including tempo, time signature, and track count.
-    * Manage scenes: create, delete, rename, and fire.
-
-* **Track Management:**
-    * Create, rename, and get detailed information for MIDI and audio tracks.
-    * Control track properties: volume, panning, mute, solo, and arm.
-    * Manage track grouping and folding states.
-
-* **MIDI Clip and Note Manipulation:**
-    * Create and name MIDI clips with specified lengths.
-    * Add, delete, transpose, and quantize notes within clips.
-    * Perform batch edits on multiple notes in a single operation.
-    * Adjust clip loop parameters and follow actions.
-
-* **Device and Parameter Control:**
-    * Load instruments and effects from Ableton's browser by URI.
-    * Get a full list of parameters for any device on a track.
-    * Set and batch-set device parameters using normalized values (0.0 to 1.0).
-
-* **Automation and Envelopes:**
-    * Add and clear automation points for any device parameter within a clip. [This feature isn't working perfectly yet.]
-    * Get information about existing clip envelopes.
-
-* **Browser Integration:**
-    * Navigate and list items from Ableton's browser.
-    * Load instruments, effects, and samples directly from a browser path or URI.
-    * Import audio files directly into audio tracks or clip slots.
-
-* **Voice & Audio Generation** 
-    * Text-to-Speech Integration: Generate narration, vocal samples, or spoken elements through ElevenLabs MCP [included].
-    * Custom Voice Creation: Clone voices for unique character in your tracks  
-    * Sound Effects: Create custom SFX with AI
-    * Direct Import: Generated audio appears instantly in your Ableton session
-
-* **AI Music Producer (NEW!)** 
-    * Complete Track Generation: Natural language to full professional arrangements
-    * Style Intelligence: Deep understanding of genres and artist signatures
-    * Stock Plugin Mastery: Professional sounds using only Ableton's built-in tools
-    * Intelligent Arrangement: AI-powered song structure and transitions
-    * Real-time Guidance: Interactive chat with AI music production expert
-
-* **Extensible Framework for Custom Tools**
-    * Example: XY Mouse Controller: Demonstrates creating custom Ableton controllers with the MCP framework
-    * Ultra-Low Latency: High-performance UDP protocol enables responsive real-time control
-    * Unlimited Possibilities: Build your own custom tools and controllers for Ableton Live
+**Into a complete Ableton Live session with:**
+- ✅ Professional arrangement structure
+- ✅ Style-accurate MIDI patterns  
+- ✅ Optimized stock plugin settings
+- ✅ Professional mixing template
+- ✅ Real-time generation in your DAW
 
 ---
 
-##  Quick Start (5 Minutes)
+## 🚀 **Key Features**
 
-### Prerequisites
-- Ableton Live 11+ (any edition)
-- Python 3.10 or higher
-- Claude Desktop or Cursor IDE
+### **🎼 Complete Track Generation**
+- **Natural Language Input**: "Create a deep house track like Keinemusik"
+- **Full Arrangements**: Intro → Verse → Chorus → Breakdown → Outro
+- **Professional Structure**: Industry-standard song layouts
+- **Real-time Creation**: Watch tracks build live in Ableton
 
-### 1. **Get the Code**
+### **🎨 Deep Style Intelligence**  
+- **Genre Mastery**: Afro House, Deep House, Progressive House, Tech House
+- **Artist Signatures**: Black Coffee, Keinemusik, Eric Prydz, Dixon
+- **Musical DNA**: Understanding of chord progressions, rhythmic patterns, sound palettes
+- **Cultural Context**: Authentic style reproduction with cultural awareness
+
+### **🛠️ Stock Plugin Expertise**
+- **Wavetable Mastery**: Advanced synthesis for leads, bass, and textures
+- **Impulse Programming**: Complete drum kit programming
+- **Effect Chains**: Professional processing templates
+- **No External Plugins Required**: Everything uses Ableton's built-in tools
+
+### **💬 Multiple Interfaces**
+- **🖥️ CLI Chat**: Terminal-based conversation with your AI producer
+- **🖼️ Desktop GUI**: Beautiful desktop application with real-time feedback
+- **🌐 Web Interface**: Modern browser-based control panel
+- **🔗 MCP Integration**: Works with Claude Desktop, Cursor, and other AI assistants
+
+### **⚡ Real-time Ableton Integration**
+- **Live Connection Monitoring**: Always know your Ableton status
+- **Instant Track Creation**: MIDI generation happens in real-time
+- **Progress Feedback**: Watch generation happen step-by-step
+- **Error Recovery**: Robust connection handling
+
+---
+
+## 🎯 **The "Suno for Ableton" Vision**
+
+Unlike cloud-based AI music generators, Chat-leton GPT:
+
+| Traditional AI Music | Chat-leton GPT |
+|---------------------|----------------|
+| ❌ Cloud-based black box | ✅ Works in your DAW |
+| ❌ Limited style control | ✅ Deep style understanding |
+| ❌ Can't edit results | ✅ Full project access |
+| ❌ Requires expensive plugins | ✅ Stock plugins only |
+| ❌ No learning workflow | ✅ Learn as you create |
+
+**Perfect for:**
+- 🎵 **Producers** wanting instant inspiration and starting points
+- 🎓 **Students** learning music production techniques
+- 🎤 **Songwriters** needing professional backing tracks
+- 🎛️ **Beatmakers** exploring new genres and styles
+- 🏠 **Home Studio Musicians** without expensive plugin collections
+
+---
+
+## ⚡ **Quick Start (10 Minutes)**
+
+### **1. Clone & Install**
 ```bash
-git clone https://github.com/uisato/ableton-mcp-extended.git
-cd ableton-mcp-extended
-pip install -e .
+git clone https://github.com/l33tdawg/chatleton-ableton-mcp.git
+cd chatleton-ableton-mcp
+pip install -r requirements.txt
 ```
 
-### 2. **Install Ableton Script**
-1. Find your Ableton Remote Scripts folder:
-   - **Windows**: `C:\Users\[You]\Documents\Ableton\User Library\Remote Scripts\`
-   - **Mac**: `~/Library/Preferences/Ableton/Live [Version]/User Remote Scripts/`
-2. Create folder: `AbletonMCP`
-3. Copy `AbletonMCP_Remote_Script/__init__.py` into this folder
+### **2. Get Your Google AI API Key**
+1. Visit: https://aistudio.google.com/app/apikey
+2. Create API key
+3. Set it: `export GOOGLE_AI_API_KEY="your-key-here"`
 
-### 3. **Configure Ableton**
-1. Open Ableton Live
-2. Go to **Preferences** → **Link, Tempo & MIDI**
-3. Set **Control Surface** to "AbletonMCP"
-4. Set Input/Output to "None"
+### **3. Launch Chat-leton GPT**
+```bash
+python launch_chatleton.py
+```
 
-### 4. **Connect AI Assistant**
+Choose your interface:
+- **1. 🖥️ CLI Chat** - Terminal conversation (works without Ableton)
+- **2. 🖼️ Desktop GUI** - Beautiful desktop app 
+- **3. 🌐 Web Interface** - Modern browser control panel
 
-**For Claude Desktop:**
+### **4. Try Without Ableton First**
+Start with CLI mode to test the AI:
+```
+👤 "Analyze the characteristics of Afro House music"
+👤 "What plugins would you use for a Black Coffee style track?"
+👤 "Create a chord progression for deep house"
+```
+
+### **5. Optional: Connect to Ableton Live**
+For real track generation:
+
+1. **Copy Remote Script:**
+   ```bash
+   # Mac
+   cp -r AbletonMCP_Remote_Script ~/Library/Preferences/Ableton/Live\ */User\ Remote\ Scripts/AbletonMCP
+   
+   # Windows  
+   copy AbletonMCP_Remote_Script "C:\Users\%USERNAME%\Documents\Ableton\User Library\Remote Scripts\AbletonMCP"
+   ```
+
+2. **Configure Ableton:**
+   - Preferences → Link, Tempo & MIDI
+   - Control Surface: "AbletonMCP"
+   - Input/Output: "None"
+
+3. **Start Generating:**
+   ```
+   👤 "Create an Afro House track at 122 BPM in the style of Black Coffee"
+   ```
+
+---
+
+## 🎛️ **Interface Options**
+
+### **🖥️ CLI Chat Interface**
+Perfect for terminal users and quick conversations:
+```bash
+python chatleton_gpt.py --cli
+```
+
+### **🖼️ Desktop GUI Application**  
+Beautiful desktop app with real-time status:
+```bash
+python chatleton_gpt.py --gui
+```
+
+### **🌐 Web Interface**
+Modern browser-based control panel:
+```bash
+python chatleton_web.py
+# Open: http://localhost:8000
+```
+
+### **🔗 MCP Integration**
+Use with Claude Desktop, Cursor, or other MCP-compatible AI assistants:
 ```json
 {
   "mcpServers": {
-    "AbletonMCP": {
+    "ChatletonGPT": {
       "command": "python",
-      "args": ["C:/path/to/ableton-mcp-extended/MCP_Server/server.py"]
+      "args": ["/path/to/chatleton-ableton-mcp/enhanced_mcp_tools.py"]
     }
   }
 }
 ```
 
-**For Cursor:**
-Add MCP server in Settings → MCP with the same path.
+---
 
-### 5. **Start Creating!** 
-Open your AI assistant and try:
-- *"Create a new MIDI track with a piano"*
-- *"Add a simple drum beat"*
-- *"What tracks do I currently have?"*
+## 🎨 **Style Examples**
+
+### **Afro House (Black Coffee Style)**
+```
+👤 "Create an Afro House track at 122 BPM with organic percussion and warm basslines"
+
+🤖 Generated:
+   - Deep, warm kick pattern
+   - Organic percussion layers (shakers, congas, bongos)
+   - Warm, rolling bassline in Am
+   - Vocal chops with traditional African elements
+   - Atmospheric pads and string sections
+   - Professional arrangement: 8 bars intro → 32 bars verse → etc.
+```
+
+### **Deep House (Keinemusik Style)**
+```
+👤 "Make a sophisticated deep house track like Keinemusik with jazz influences"
+
+🤖 Generated:
+   - Vintage electric piano chords (Wavetable + effects)
+   - Swinging drum pattern with jazz-inspired hi-hats  
+   - Sophisticated chord progression: Dm7 - G7 - CM7 - Am7
+   - Warm analog-style bassline
+   - Vinyl-inspired effects and saturation
+```
+
+### **Progressive House Anthem**
+```
+👤 "Create an epic progressive house anthem with massive builds"
+
+🤖 Generated:
+   - Epic lead synthesizer (Wavetable)
+   - Driving, four-on-the-floor kick pattern
+   - Emotional breakdown with strings and vocals
+   - Progressive arrangement with tension builds
+   - Reverb-soaked atmospheric elements
+```
 
 ---
 
-## 🎵 **AI Music Producer Extension** (NEW!)
+## 🧠 **AI Music Intelligence**
 
-We've supercharged the system with **Google Gemini 2.5 Flash** to create an **AI Music Producer** that generates complete, professional tracks from simple requests!
+### **Style Analyzer**
+- **Musical DNA Understanding**: Chord progressions, rhythm patterns, sound textures
+- **Artist Signature Recognition**: Unique production techniques and characteristics  
+- **Cultural Context Awareness**: Authentic representation of musical traditions
+- **Harmonic Analysis**: Advanced chord theory and progression generation
 
-### **🚀 What It Does**
+### **Stock Plugin Expert**
+- **Wavetable Synthesis**: 500+ specialized presets for different genres
+- **Effect Chain Templates**: Professional processing chains for every style
+- **Impulse Drum Programming**: Genre-specific drum kit setups
+- **Mixing Guidelines**: Professional mixing approaches per style
 
-Transform this simple request:
-```
-👤 "Create an Afro House track in the style of Black Coffee at 122 BPM"
-```
-
-Into a complete production plan:
-- **Style Analysis**: Deep understanding of Afro House characteristics
-- **Track Elements**: Kick, bass, hi-hats, percussion, vocal chops, pads
-- **Harmonic Progression**: Am - F - C - G (style-appropriate)
-- **Arrangement Plan**: Intro (32 bars) → Verse → Chorus → Breakdown → Outro
-- **Plugin Recommendations**: Specific Ableton stock plugin settings
-- **Mix Guidelines**: Professional mixing approach for the style
-
-### **🎨 Style Intelligence**
-
-The AI understands musical styles deeply:
-- **Afro House**: Black Coffee, organic percussion, warm basslines
-- **Keinemusik Style**: Sophisticated deep house, vintage electric pianos  
-- **Progressive House**: Eric Prydz, epic builds, emotional breakdowns
-- **Deep House**: Dixon, jazz influences, vintage warmth
-- **Tech House**: Punchy, tribal elements, rolling basslines
-
-### **🛠️ Stock Plugin Mastery**
-
-Professional sounds using only Ableton's built-in tools:
-- **Wavetable**: Advanced synthesis for leads, bass, and textures
-- **Bass**: Dedicated analog-style bass sounds
-- **Impulse**: Complete drum programming
-- **Effect Chains**: Professional processing templates
-
-### **Quick Start with AI Producer**
-
-1. **Set your Google AI API key:**
-```bash
-export GOOGLE_AI_API_KEY="your-gemini-api-key"
-```
-
-2. **Install dependencies:**
-```bash
-pip install google-generativeai>=0.8.0 librosa pretty_midi
-```
-
-3. **Try the demo:**
-```bash
-python demo_ai_music_producer.py
-```
-
-4. **Use in your AI assistant:**
-```
-👤 "Generate a complete Afro House track inspired by Black Coffee"
-👤 "Create a Keinemusik-style deep house track with sophisticated chords"
-👤 "Make a progressive house anthem with epic builds"
-```
-
-### **Available AI Tools**
-
-- **`generate_complete_track`**: Complete track generation from description
-- **`create_afro_house_track`**: Specific Afro House generation
-- **`create_keinemusik_style_track`**: Sophisticated deep house
-- **`create_progressive_house_anthem`**: Epic progressive house
-- **`analyze_and_replicate_style`**: Analyze and recreate any style
-- **`chat_with_ai_producer`**: Interactive music production guidance
+### **Arrangement Intelligence**
+- **Song Structure Templates**: Industry-standard arrangements
+- **Energy Curve Planning**: Optimal tension and release patterns
+- **Transition Generation**: Smooth, professional transitions between sections
+- **Build and Breakdown Logic**: Dynamic arrangement elements
 
 ---
 
-## How It Works
+## 🛠️ **Technical Architecture**
 
 ```mermaid
 graph TB
-    A[You: Natural Language] --> B[AI Assistant]
-    B --> C[MCP Server]
-    C --> D[Ableton Remote Script]
-    D --> E[Ableton Live API]
-    E --> F[🎵 Your Music]
+    A[You: Natural Language] --> B[Chat-leton GPT]
+    B --> C[Google Gemini 2.5 Flash]
+    C --> D[Music Intelligence Modules]
+    D --> E[Style Analyzer]
+    D --> F[Stock Plugin Expert]  
+    D --> G[Arrangement Generator]
+    B --> H[Enhanced Ableton Integration]
+    H --> I[Real-time MIDI Generation]
+    H --> J[Ableton Live Session]
     
-    G[ElevenLabs AI] --> H[Generated Audio]
-    H --> C
+    K[CLI Interface] --> B
+    L[GUI Interface] --> B
+    M[Web Interface] --> B
+    N[MCP Interface] --> B
 ```
 
-1. You issue a command in plain English to your AI assistant (e.g., "Create a new MIDI track and name it 'Bass'").
-2. The AI Assistant understands the intent and calls the appropriate tool from the MCP server.
-3. The MCP Server (server.py) receives the tool call and constructs a specific JSON command.
-4. The Ableton Remote Script (__init__.py), running inside Live, receives the JSON command via a socket connection.
-5. The Remote Script executes the command using the official Ableton Live API, making the change in your session instantly.
+### **Core Components**
+
+**🧠 GeminiOrchestrator**
+- Main AI brain powered by Google Gemini 2.5 Flash
+- Creative brief generation and analysis
+- Natural language understanding for music requests
+
+**🎵 StyleAnalyzer** 
+- Deep musical style database
+- Artist signature recognition
+- Cultural and musical context understanding
+
+**🎛️ StockPluginExpert**
+- Comprehensive Ableton stock plugin knowledge
+- Genre-specific preset libraries
+- Professional effect chain templates
+
+**⚡ EnhancedAbletonIntegration**
+- Real-time Ableton Live connection
+- MIDI generation and track creation
+- Connection monitoring and error recovery
 
 ---
 
-## Advanced Features
+## 📚 **Available Commands**
 
-<details>
-<summary><strong>🚀 High-Performance Mode (UDP Server)</strong></summary>
+### **Track Generation**
+- `"Create an [GENRE] track at [BPM] BPM"`
+- `"Generate a [ARTIST NAME] style track"`
+- `"Make a track in the style of [REFERENCE SONG]"`
 
+### **Style Analysis**
+- `"Analyze the characteristics of [GENRE]"`
+- `"What makes [ARTIST] unique?"`
+- `"Explain the musical elements of [STYLE]"`
 
-For real-time parameter control with ultra-low latency:
+### **Production Guidance**
+- `"What plugins should I use for [GENRE]?"`
+- `"How do I achieve [SPECIFIC SOUND]?"`
+- `"Create a chord progression for [STYLE]"`
 
+### **Project Management**  
+- `"What's the status of my Ableton connection?"`
+- `"Show me my current session info"`
+- `"Help me arrange this track"`
+
+---
+
+## 🎓 **Learning & Education**
+
+Chat-leton GPT isn't just a generator - it's a **music production teacher**:
+
+### **Learn While You Create**
+- **Technique Explanations**: Understand why certain choices are made
+- **Plugin Education**: Learn Ableton's stock plugins deeply
+- **Music Theory Integration**: Chord progressions, scales, and harmony
+- **Production Tips**: Professional mixing and arrangement advice
+
+### **Style Deep Dives**
+- **Cultural Context**: Understanding the roots and evolution of genres
+- **Artist Analysis**: What makes each producer unique
+- **Technical Breakdown**: How to achieve signature sounds
+- **Historical Perspective**: Genre development and influences
+
+---
+
+## 🔧 **Troubleshooting**
+
+### **Common Issues**
+
+**❌ "Connection Refused" Error**
 ```bash
-# Install the hybrid server
-cp -r Ableton-MCP_hybrid-server/AbletonMCP_UDP/ ~/Remote\ Scripts/AbletonMCP_UDP/
+# Start the MCP server manually:
+python MCP_Server/server.py
 
-# Try the XY Mouse Controller example
-cd experimental_tools/xy_mouse_controller
-python mouse_parameter_controller_udp.py
+# Or check if Ableton Remote Script is installed correctly
 ```
 
-This demonstrates how to build:
-- Custom real-time controllers for Ableton
-- Expressive performance tools
-- Interactive music applications
-</details>
-
-<details>
-<summary><strong>🎤 ElevenLabs Voice Integration</strong></summary>
-
-
-This repository can be integrated with other MCP servers, such as one for ElevenLabs, to generate and import audio directly into your project.
-
-Set up the ElevenLabs MCP server according to its instructions.
-
-Update your AI assistant's config to include both servers.
-
-Example mcp-config.json:
-
-```json
-{
-  "mcpServers": {
-    "AbletonMCP": {
-      "command": "python",
-      "args": ["/path/to/ableton-mcp-extended/server.py"]
-    },
-    "ElevenLabs": {
-      "command": "python",
-      "args": ["/path/to/elevenlabs_mcp/server.py"],
-      "env": {
-        "ELEVENLABS_API_KEY": "your-api-key-here"
-      }
-    }
-  }
-}
+**❌ "API Key Not Set"**
+```bash
+export GOOGLE_AI_API_KEY="your-key-here"
+# Add to your ~/.bashrc or ~/.zshrc for persistence
 ```
 
-</details>
+**❌ "Module Not Found"**
+```bash
+pip install -r requirements.txt
+# Ensure all dependencies are installed
+```
+
+### **Testing**
+```bash
+# Test AI functionality (works without Ableton):
+python test_ai_producer.py
+
+# Test Ableton connection:
+python test_ableton_integration.py --quick
+
+# Interactive test with troubleshooting:
+python test_ableton_integration.py --interactive
+```
 
 ---
 
-## Components Overview
+## 🚀 **What's Next**
 
-This project includes several specialized components:
+### **Phase 1: Foundation** ✅
+- ✅ Google Gemini 2.5 Flash integration
+- ✅ Comprehensive style database
+- ✅ Stock plugin expert system
+- ✅ Multiple interface options
 
-### **Core MCP Server**
-- Standard TCP communication for reliable AI control
-- Extensive Ableton Live API integration
-- Compatible with Claude Desktop, Cursor, and Gemini CLI.
+### **Phase 2: Intelligence** 🚧
+- 🔄 Advanced sample curation system
+- 🔄 Harmonic progression AI
+- 🔄 Professional arrangement templates
+- 🔄 Sound design automation
 
-### **Hybrid TCP/UDP Server** 
-- High-performance real-time parameter control
-- Ultra-low latency for live performance
-- Perfect for controllers and interactive tools
-
-### **ElevenLabs Integration**
-- Professional text-to-speech generation
-- Custom voice creation and cloning
-- Direct import into Ableton sessions
-- Real-time SFX generation
-
-### **Experimental Tools & Examples**
-- **XY Mouse Controller**: Example demonstrating how to build custom Ableton controllers
-- **Extensible Framework**: Foundation for creating your own control interfaces
-- **Proof of Concept**: Shows the power and flexibility of the MCP approach
+### **Phase 3: Community** 📅
+- 📅 Style sharing marketplace
+- 📅 Collaborative track generation
+- 📅 Integration with streaming platforms
+- 📅 Educational content library
 
 ---
 
-## Documentation
+## 🤝 **Contributing**
 
-- **[Installation Guide](INSTALLATION.md)** - Detailed setup instructions
-- **[User Guide](README.md)** - What, which, and how  
+We welcome contributions! Areas where help is needed:
 
----
-
-## Community & Support
-
-- **GitHub Issues**: Bug reports and feature requests
-- **Discussions**: Share your creations and get help
-
-### **Share Your Creations**
-Tag me with your AI-generated experiments! I love seeing what the community creates:
-
-[YouTube](https://www.youtube.com/@uisato_) |
-[Instagram](https://www.instagram.com/uisato_) |
-[Patreon](https://www.patreon.com/c/uisato) |
-[Website](https://www.uisato.art/) 
+- **🎵 Style Database**: Adding new genres and artist styles
+- **🎛️ Plugin Presets**: Creating more stock plugin templates
+- **🌍 Localization**: Multi-language support
+- **📱 Mobile Apps**: iOS/Android interfaces
+- **🎓 Educational Content**: Tutorials and learning materials
 
 ---
 
-## What's Next
-
-- **Fixing Automation Point Placement Bugs**
-- **VST Plugin Support** - Control third-party plugins [Though it can be achieved throught the "Configure" parameter function]
-- **Arrangement View** - Full timeline control
-- **Hardware Integration** - Bridge MIDI controllers through AI
-- **Advanced AI** - Smarter and better music understanding and generation
-
----
-
-## License & Credits
+## 📄 **License**
 
 This project is licensed under the MIT License - see [LICENSE](LICENSE) for details.
 
-**Built with:**
-- [Model Context Protocol](https://github.com/modelcontextprotocol) - AI integration framework
-- [ElevenLabs API](https://elevenlabs.io) - Professional voice generation
+---
+
+## 🙏 **Acknowledgments**
+
+**Built Upon:**
+- Original [ableton-mcp](https://github.com/ahujasid/ableton-mcp) by Sid Ahuja
+- Extended and completely reimagined as a standalone AI music producer
+
+**Powered By:**
+- [Google Gemini 2.5 Flash](https://ai.google.dev/) - AI orchestration
+- [Model Context Protocol](https://github.com/modelcontextprotocol) - AI integration
 - [Ableton Live](https://www.ableton.com) - Digital audio workstation
 
-**Inspired by:** The original [ableton-mcp](https://github.com/ahujasid/ableton-mcp) project
+**Music Production Community:**
+- Black Coffee, Keinemusik, Eric Prydz, and countless artists who inspire
+- The Ableton Live user community
+- Music producers worldwide pushing creative boundaries
 
 ---
 
 <div align="center">
 
-**Made with ❤️ for the music production community**
+**🎵 Made with ❤️ for Music Producers Everywhere 🎵**
 
-*If this project helps your creativity, consider giving it a ⭐ star!*
+*Your next hit track is just a conversation away.*
+
+**[⭐ Star this repo](https://github.com/l33tdawg/chatleton-ableton-mcp) | [🐛 Report Issues](https://github.com/l33tdawg/chatleton-ableton-mcp/issues) | [💬 Join Discussions](https://github.com/l33tdawg/chatleton-ableton-mcp/discussions)**
 
 </div> 

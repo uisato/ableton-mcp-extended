@@ -15,10 +15,22 @@ from .gemini_orchestrator import GeminiOrchestrator
 from .style_analyzer import StyleAnalyzer
 from .stock_plugin_expert import StockPluginExpert
 from .ableton_integration import EnhancedAbletonIntegration
+from .ai_experts import (
+    AIExpertOrchestrator,
+    DrumExpert,
+    BassExpert,
+    HarmonyExpert,
+    MelodyExpert
+)
 
 __all__ = [
     "GeminiOrchestrator",
     "StyleAnalyzer", 
     "StockPluginExpert",
-    "EnhancedAbletonIntegration"
+    "EnhancedAbletonIntegration",
+    "AIExpertOrchestrator",
+    "DrumExpert",
+    "BassExpert",
+    "HarmonyExpert",
+    "MelodyExpert"
 ] 

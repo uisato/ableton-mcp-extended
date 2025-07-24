@@ -414,28 +414,27 @@ def load_instrument_or_effect(ctx: Context, track_index: int, uri: str) -> str:
     
     Parameters:
     - track_index: The index of the track to load the instrument on
-    - uri: The URI of the instrument or effect to load (e.g., 'query:Synths#Instrument%20Rack:Bass:FileId_5116')
+    - uri: Simple identifier for the instrument (drums, bass, synth)
     """
     try:
         ableton = get_ableton_connection()
-        result = ableton.send_command("load_browser_item", {
+        result = ableton.send_command("load_instrument_or_effect", {
             "track_index": track_index,
-            "item_uri": uri
+            "uri": uri
         })
         
         # Check if the instrument was loaded successfully
-        if result.get("loaded", False):
-            new_devices = result.get("new_devices", [])
-            if new_devices:
-                return f"Loaded instrument with URI '{uri}' on track {track_index}. New devices: {', '.join(new_devices)}"
+        if result.get("status") == "success":
+            instrument_info = result.get("result", {})
+            if instrument_info.get("loaded", False):
+                return f"✅ Loaded {instrument_info.get('type', 'instrument')} on track {track_index}"
             else:
-                devices = result.get("devices_after", [])
-                return f"Loaded instrument with URI '{uri}' on track {track_index}. Devices on track: {', '.join(devices)}"
+                return f"⚠️ Partially loaded instrument on track {track_index}: {instrument_info.get('message', 'Unknown issue')}"
         else:
-            return f"Failed to load instrument with URI '{uri}'"
+            return f"❌ Failed to load instrument: {result.get('message', 'Unknown error')}"
     except Exception as e:
-        logger.error(f"Error loading instrument by URI: {str(e)}")
-        return f"Error loading instrument by URI: {str(e)}"
+        logger.error(f"Error loading instrument: {str(e)}")
+        return f"❌ Error loading instrument: {str(e)}"
 
 @mcp.tool()
 def fire_clip(ctx: Context, track_index: int, clip_index: int) -> str:
@@ -604,58 +603,216 @@ def get_browser_items_at_path(ctx: Context, path: str) -> str:
             return f"Error getting browser items at path: {error_msg}"
 
 @mcp.tool()
-def load_drum_kit(ctx: Context, track_index: int, rack_uri: str, kit_path: str) -> str:
+def load_drum_kit(ctx: Context, track_index: int, kit_type: str = "standard") -> str:
     """
-    Load a drum rack and then load a specific drum kit into it.
+    Load a drum kit onto a track.
     
     Parameters:
     - track_index: The index of the track to load on
-    - rack_uri: The URI of the drum rack to load (e.g., 'Drums/Drum Rack')
-    - kit_path: Path to the drum kit inside the browser (e.g., 'drums/acoustic/kit1')
+    - kit_type: Type of drum kit (standard, acoustic, electronic, etc.)
     """
     try:
         ableton = get_ableton_connection()
         
-        # Step 1: Load the drum rack
-        result = ableton.send_command("load_browser_item", {
+        # Use the fixed instrument loading command
+        result = ableton.send_command("load_instrument_or_effect", {
             "track_index": track_index,
-            "item_uri": rack_uri
+            "uri": "drums"
         })
         
-        if not result.get("loaded", False):
-            return f"Failed to load drum rack with URI '{rack_uri}'"
-        
-        # Step 2: Get the drum kit items at the specified path
-        kit_result = ableton.send_command("get_browser_items_at_path", {
-            "path": kit_path
-        })
-        
-        if "error" in kit_result:
-            return f"Loaded drum rack but failed to find drum kit: {kit_result.get('error')}"
-        
-        # Step 3: Find a loadable drum kit
-        kit_items = kit_result.get("items", [])
-        loadable_kits = [item for item in kit_items if item.get("is_loadable", False)]
-        
-        if not loadable_kits:
-            return f"Loaded drum rack but no loadable drum kits found at '{kit_path}'"
-        
-        # Step 4: Load the first loadable kit
-        kit_uri = loadable_kits[0].get("uri")
-        load_result = ableton.send_command("load_browser_item", {
-            "track_index": track_index,
-            "item_uri": kit_uri
-        })
-        
-        return f"Loaded drum rack and kit '{loadable_kits[0].get('name')}' on track {track_index}"
+        if result.get("status") == "success":
+            instrument_info = result.get("result", {})
+            if instrument_info.get("loaded", False):
+                return f"✅ Loaded drum kit on track {track_index}"
+            else:
+                return f"⚠️ Could not find drum kit, track remains empty: {instrument_info.get('message', '')}"
+        else:
+            return f"❌ Failed to load drum kit: {result.get('message', 'Unknown error')}"
     except Exception as e:
         logger.error(f"Error loading drum kit: {str(e)}")
-        return f"Error loading drum kit: {str(e)}"
+        return f"❌ Error loading drum kit: {str(e)}"
+
+@mcp.tool()
+def set_scale_constraint(ctx: Context, track_index: int, root_note: str, scale_type: str) -> str:
+    """
+    Set scale constraint on a track using Ableton's Scale device.
+    
+    Parameters:
+    - track_index: Index of the track to constrain
+    - root_note: Root note (C, C#, D, etc.)
+    - scale_type: Scale type (major, minor, dorian, etc.)
+    """
+    try:
+        ableton = get_ableton_connection()
+        
+        # Convert root note to parameter value (0-11)
+        note_map = {
+            'C': 0, 'C#': 1, 'Db': 1, 'D': 2, 'D#': 3, 'Eb': 3, 'E': 4,
+            'F': 5, 'F#': 6, 'Gb': 6, 'G': 7, 'G#': 8, 'Ab': 8, 'A': 9,
+            'A#': 10, 'Bb': 10, 'B': 11
+        }
+        
+        # Convert scale type to parameter value
+        scale_map = {
+            'major': 0, 'minor': 1, 'dorian': 2, 'phrygian': 3,
+            'lydian': 4, 'mixolydian': 5, 'aeolian': 6, 'locrian': 7
+        }
+        
+        root_value = note_map.get(root_note.upper(), 0)
+        scale_value = scale_map.get(scale_type.lower(), 0)
+        
+        # Set Scale device parameters
+        result = ableton.send_command("set_scale_device_parameters", {
+            "track_index": track_index,
+            "parameters": {
+                "base": root_value,
+                "scale": scale_value
+            }
+        })
+        
+        if result.get("device_found", False):
+            return f"Scale constraint set: {root_note} {scale_type} on track {track_index}"
+        else:
+            return f"Failed to set scale constraint: {result.get('error', 'Unknown error')}"
+            
+    except Exception as e:
+        logger.error(f"Error setting scale constraint: {str(e)}")
+        return f"Error setting scale constraint: {str(e)}"
+
+
+@mcp.tool()
+def create_midi_clip_with_proper_length(ctx: Context, track_index: int, clip_index: int, length_bars: int) -> str:
+    """
+    Create a MIDI clip with proper length setting to prevent 2-3 bar looping issues.
+    
+    Parameters:
+    - track_index: Index of the track
+    - clip_index: Index of the clip slot
+    - length_bars: Length in bars (e.g., 8, 16, 32)
+    """
+    try:
+        ableton = get_ableton_connection()
+        
+        # Create clip with proper length
+        result = ableton.send_command("create_clip", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "length": length_bars
+        })
+        
+        if result.get("name"):
+            return f"Created clip '{result['name']}' with {length_bars} bars (loop_end: {result.get('loop_end', 'unknown')})"
+        else:
+            return f"Failed to create clip: {result}"
+            
+    except Exception as e:
+        logger.error(f"Error creating clip with proper length: {str(e)}")
+        return f"Error creating clip: {str(e)}"
+
+
+@mcp.tool()
+def get_device_info(ctx: Context, track_index: int, device_index: int = 0) -> str:
+    """
+    Get detailed information about a device and its parameters.
+    
+    Parameters:
+    - track_index: Index of the track
+    - device_index: Index of the device (default: 0)
+    """
+    try:
+        ableton = get_ableton_connection()
+        
+        result = ableton.send_command("get_device_parameters", {
+            "track_index": track_index,
+            "device_index": device_index
+        })
+        
+        if "error" in result:
+            return f"Error getting device info: {result['error']}"
+            
+        device_name = result.get("device_name", "Unknown")
+        device_class = result.get("device_class", "Unknown")
+        parameters = result.get("parameters", [])
+        
+        info = f"Device: {device_name} ({device_class})\n"
+        info += f"Parameters ({len(parameters)}):\n"
+        
+        for param in parameters[:10]:  # Show first 10 parameters
+            info += f"  {param['name']}: {param['value']:.3f} [{param['min']:.3f}-{param['max']:.3f}]\n"
+            
+        if len(parameters) > 10:
+            info += f"  ... and {len(parameters) - 10} more parameters"
+            
+        return info
+        
+    except Exception as e:
+        logger.error(f"Error getting device info: {str(e)}")
+        return f"Error getting device info: {str(e)}"
 
 # Main execution
 def main():
     """Run the MCP server"""
     mcp.run()
+
+# Import enhanced functions 
+try:
+    from MCP_Server.enhanced_server import get_available_instruments, get_available_drum_kits, load_specific_instrument, load_specific_drum_kit, suggest_instruments_for_genre
+except ImportError:
+    # Fallback if enhanced server not available
+    def get_available_instruments(ctx): return "Enhanced instruments not available"
+    def get_available_drum_kits(ctx): return "Enhanced drum kits not available"
+    def load_specific_instrument(ctx, track_index, instrument_name): return "Enhanced loading not available"
+    def load_specific_drum_kit(ctx, track_index, kit_name): return "Enhanced loading not available"  
+    def suggest_instruments_for_genre(ctx, genre, track_types): return "Enhanced suggestions not available"
+
+@mcp.tool()
+def get_available_instruments_for_ai(ctx: Context) -> str:
+    """
+    Get the complete list of available instruments in Ableton Live.
+    Shows instruments categorized by type so AI can make intelligent selections.
+    """
+    return get_available_instruments(ctx)
+
+@mcp.tool()
+def get_available_drum_kits_for_ai(ctx: Context) -> str:
+    """
+    Get the complete list of available drum kits in Ableton Live.
+    Shows drum kits categorized by genre/style so AI can choose appropriate ones.
+    """
+    return get_available_drum_kits(ctx)
+
+@mcp.tool() 
+def load_specific_instrument_by_name(ctx: Context, track_index: int, instrument_name: str) -> str:
+    """
+    Load a specific instrument by its exact name (e.g., "Analog", "Bass", "Drift").
+    
+    Parameters:
+    - track_index: The track to load the instrument on
+    - instrument_name: Exact name of the instrument
+    """
+    return load_specific_instrument(ctx, track_index, instrument_name)
+
+@mcp.tool()
+def load_specific_drum_kit_by_name(ctx: Context, track_index: int, kit_name: str) -> str:
+    """
+    Load a specific drum kit by its exact name (e.g., "64 Pads Dub Techno Kit.adg").
+    
+    Parameters:
+    - track_index: The track to load the drum kit on  
+    - kit_name: Exact name of the drum kit
+    """
+    return load_specific_drum_kit(ctx, track_index, kit_name)
+
+@mcp.tool()
+def suggest_instruments_for_music_genre(ctx: Context, genre: str, track_types: list) -> str:
+    """
+    Get AI-curated instrument suggestions for a specific genre.
+    
+    Parameters:
+    - genre: Musical genre (e.g., "deep house", "jazz", "trap", "rock")
+    - track_types: List of track types needed (e.g., ["drums", "bass", "lead", "pads"])
+    """
+    return suggest_instruments_for_genre(ctx, genre, track_types)
 
 if __name__ == "__main__":
     main()

@@ -277,7 +277,7 @@ class AbletonIntegrationTester:
         print("   1. Make sure Ableton Live is running")
         print("   2. Install AbletonMCP Remote Script")
         print("   3. Set Control Surface to 'AbletonMCP'")
-        print("   4. Check that port 11999 is not blocked")
+        print("   4. Check that port 9877 is not blocked")
 
 
 async def run_interactive_test():
