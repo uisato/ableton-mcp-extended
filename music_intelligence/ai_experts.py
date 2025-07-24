@@ -38,24 +38,53 @@ class AIExpertBase:
                 return self._fallback_response(prompt, context)
             
             response_text = response.text.strip()
+            
+            # Check for completely empty or whitespace-only responses
+            if not response_text:
+                logger.warning(f"❌ {self.expert_type} returned empty or whitespace-only response")
+                return self._fallback_response(prompt, context)
+            
             logger.debug(f"🧠 {self.expert_type} raw response: {response_text[:200]}...")
             
-            # Try to parse JSON
+            # Try to parse JSON - handle markdown code blocks first
             try:
-                return json.loads(response_text)
+                # Check if response is wrapped in markdown code blocks
+                if response_text.startswith('```'):
+                    # Extract JSON from markdown code block
+                    import re
+                    # Match ```json ... ``` or ``` ... ```
+                    code_block_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', response_text, re.DOTALL)
+                    if code_block_match:
+                        json_content = code_block_match.group(1).strip()
+                        logger.info(f"🔧 {self.expert_type} extracted JSON from markdown block")
+                        return json.loads(json_content)
+                    else:
+                        # Fallback: try to find JSON after the opening ```
+                        json_content = response_text.split('```')[1] if '```' in response_text else response_text
+                        if json_content.startswith('json'):
+                            json_content = json_content[4:].strip()
+                        return json.loads(json_content)
+                else:
+                    # Try direct JSON parsing
+                    return json.loads(response_text)
+                    
             except json.JSONDecodeError as e:
                 logger.error(f"❌ {self.expert_type} JSON decode error: {e}")
-                logger.error(f"Raw response was: {response_text}")
+                logger.error(f"Raw response was: '{response_text[:500]}...' (truncated)")
                 
-                # Try to extract JSON from response if it's embedded in text
+                # Fallback: Try to extract JSON from response if it's embedded in text
                 import re
                 json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
                 if json_match:
                     try:
-                        return json.loads(json_match.group(0))
-                    except json.JSONDecodeError:
+                        json_content = json_match.group(0)
+                        logger.info(f"🔧 {self.expert_type} attempting to parse extracted JSON: {json_content[:200]}...")
+                        return json.loads(json_content)
+                    except json.JSONDecodeError as e2:
+                        logger.error(f"❌ {self.expert_type} extracted JSON also failed: {e2}")
                         pass
                 
+                logger.warning(f"🔄 {self.expert_type} falling back to safe default response")
                 return self._fallback_response(prompt, context)
                 
         except Exception as e:
@@ -103,6 +132,19 @@ Consider emphasizing beats that align with chord changes and creating rhythmic t
 that supports the harmonic progression.
 """
         
+        # Add available drum kits information if provided
+        drum_kits_section = ""
+        available_drum_kits = context.get('available_drum_kits', '')
+        if available_drum_kits:
+            drum_kits_section = f"""
+
+AVAILABLE DRUM KITS IN ABLETON LIVE:
+{available_drum_kits[:2000]}...
+
+IMPORTANT: Consider using specific drum kits from the available library that match {style} style.
+Mention specific kit names in your recommendations for optimal sound selection.
+"""
+        
         return f"""
 You are a world-class drum programmer and rhythm expert specializing in {style} music.
 
@@ -112,6 +154,7 @@ EXPERTISE AREAS:
 - Knowledge of classic drum machines (808, 909, 707) and their characteristics
 - Expertise in layering percussion elements for depth and interest
 - Collaborative awareness of how rhythm supports harmonic progressions
+- Knowledge of Ableton Live's complete drum kit library for intelligent selection
 
 CURRENT TASK: {prompt}
 
@@ -122,6 +165,7 @@ CONTEXT:
 - Length: {bars} bars
 - Energy level: {context.get('energy', 'medium')}
 {collaboration_section}
+{drum_kits_section}
 
 ENHANCED REQUIREMENTS (with expert collaboration):
 1. Create a COMPLETE drum kit arrangement, not just kicks
@@ -277,6 +321,26 @@ OTHER EXPERT CONTEXT FOR REFINEMENT:
 FOCUS: Address the refinement request while maintaining musical coherence with other parts.
 """
         
+        # Add available instruments information if provided
+        instruments_section = ""
+        available_instruments = context.get('available_instruments', '')
+        if available_instruments:
+            # Extract bass-specific instruments from the full list
+            bass_instruments = []
+            for line in available_instruments.split('\n'):
+                if 'BASS INSTRUMENTS' in line.upper() or (line.startswith('  •') and 'bass' in line.lower()):
+                    bass_instruments.append(line.strip())
+            
+            if bass_instruments:
+                instruments_section = f"""
+
+AVAILABLE BASS INSTRUMENTS IN ABLETON LIVE:
+{chr(10).join(bass_instruments[:10])}
+
+IMPORTANT: Consider recommending specific bass instruments from the available library that best suit {style} style.
+Include instrument selection advice in your bass line recommendations.
+"""
+        
         return f"""
 You are a world-class bass player and programmer, expert in {style} music production.
 
@@ -286,6 +350,7 @@ EXPERTISE AREAS:
 - Knowledge of bass synthesis and processing techniques
 - Understanding how bass interacts with kick drums and other elements
 - Collaborative awareness of how bass fits with harmony, rhythm, and melody
+- Knowledge of Ableton Live's complete instrument library for optimal bass selection
 
 CURRENT TASK: {prompt}
 
@@ -299,6 +364,7 @@ CONTEXT:
 - Energy level: {context.get('energy', 'medium')}
 {collaboration_section}
 {refinement_section}
+{instruments_section}
 
 ENHANCED REQUIREMENTS (with expert collaboration):
 1. Create a bass line that supports the chord progression musically
@@ -557,6 +623,27 @@ OTHER EXPERT CONTEXT FOR REFINEMENT:
 FOCUS: Address the refinement request while maintaining musical coherence with harmony, bass, and drums.
 """
         
+        # Add available instruments information if provided
+        instruments_section = ""
+        available_instruments = context.get('available_instruments', '')
+        if available_instruments:
+            # Extract synth/lead instruments from the full list
+            lead_instruments = []
+            for line in available_instruments.split('\n'):
+                if any(keyword in line.upper() for keyword in ['SYNTHESIZERS', 'MELODIC INSTRUMENTS']) or \
+                   (line.startswith('  •') and any(keyword in line.lower() for keyword in ['analog', 'wavetable', 'lead', 'synth', 'electric'])):
+                    lead_instruments.append(line.strip())
+            
+            if lead_instruments:
+                instruments_section = f"""
+
+AVAILABLE LEAD/MELODY INSTRUMENTS IN ABLETON LIVE:
+{chr(10).join(lead_instruments[:15])}
+
+IMPORTANT: Consider recommending specific synthesizers from the available library that best suit {style} lead/melody sounds.
+Include instrument selection advice in your melodic recommendations.
+"""
+        
         return f"""
 You are a world-class melodist and lead synthesizer programmer, expert in {style} music.
 
@@ -566,6 +653,7 @@ EXPERTISE AREAS:
 - Knowledge of synth lead programming and sound design
 - Understanding of call-and-response, sequence, and motivic development
 - Collaborative awareness of how melody fits with harmony, bass, and rhythm
+- Knowledge of Ableton Live's complete synthesizer library for optimal lead selection
 
 CURRENT TASK: {prompt}
 
@@ -578,6 +666,7 @@ CONTEXT:
 - Energy level: {context.get('energy', 'medium')}
 {collaboration_section}
 {refinement_section}
+{instruments_section}
 
 ENHANCED REQUIREMENTS (with expert collaboration):
 1. Create memorable, singable melodies that fit {style}
@@ -682,8 +771,8 @@ class AIExpertOrchestrator:
         self.melody_expert = MelodyExpert(model)
         logger.info("🎼 AI Expert Orchestrator initialized with collaborative specialists")
     
-    async def generate_complete_section(self, style: str, key: str, bpm: int, section: str, bars: int, energy: str = "medium") -> Dict:
-        """Generate a complete musical section using collaborative expert cross-sharing"""
+    async def generate_complete_section(self, style: str, key: str, bpm: int, section: str, bars: int, energy: str = "medium", available_instruments: str = "", available_drum_kits: str = "") -> Dict:
+        """Generate a complete musical section using collaborative expert cross-sharing with full instrument knowledge"""
         logger.info(f"🎵 Generating {section} section with expert collaboration: {style} in {key} at {bpm} BPM ({bars} bars)")
         
         context = {
@@ -692,7 +781,9 @@ class AIExpertOrchestrator:
             'bpm': bpm,
             'section': section,
             'bars': bars,
-            'energy': energy
+            'energy': energy,
+            'available_instruments': available_instruments,
+            'available_drum_kits': available_drum_kits
         }
         
         # PHASE 1: Foundation - Harmony Expert sets the harmonic framework

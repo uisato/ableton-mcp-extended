@@ -31,7 +31,7 @@ project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
 # Core AI imports
-from music_intelligence import GeminiOrchestrator, StyleAnalyzer, StockPluginExpert
+from music_intelligence import GeminiOrchestrator, StyleAnalyzer, StockPluginExpert, InstrumentManager
 
 # Configure logging
 logging.basicConfig(
@@ -62,6 +62,7 @@ class ChatletonGPT:
         self.orchestrator = None
         self.style_analyzer = None
         self.plugin_expert = None
+        self.instrument_manager = None
         
         # Application state
         self.running = False
@@ -90,6 +91,7 @@ class ChatletonGPT:
             self.orchestrator = GeminiOrchestrator()
             self.style_analyzer = StyleAnalyzer()
             self.plugin_expert = StockPluginExpert()
+            self.instrument_manager = InstrumentManager()
             
             # Start chat session
             self.orchestrator.start_chat_session()
@@ -346,114 +348,134 @@ class ChatletonGPT:
                 'pads': conn.send_command('create_midi_track', {'name': f'{brief.style} Pads'})
             }
             
-            # Enhanced instrument selection based on genre/style
-            print("🎵 Getting genre-specific instrument suggestions...")
-            try:
-                # Get AI-curated suggestions for the style
-                track_types = ['drums', 'bass', 'lead', 'pads']
-                style = user_input.lower()
-                
-                # Extract genre from user input (simple approach)
-                genre = 'deep house'  # default
-                if any(x in style for x in ['jazz', 'swing', 'bebop']):
-                    genre = 'jazz'
-                elif any(x in style for x in ['trap', 'hip hop', 'rap']):
-                    genre = 'trap' 
-                elif any(x in style for x in ['rock', 'punk', 'metal']):
-                    genre = 'rock'
-                elif any(x in style for x in ['house', 'techno', 'electronic', 'edm']):
-                    genre = 'deep house'
-                
-                suggestions_result = conn.send_command('suggest_instruments_for_music_genre', {
-                    'genre': genre,
-                    'track_types': track_types
-                })
-                print(f"📊 Genre suggestions for {genre}:")
-                print(suggestions_result)
-                
-            except Exception as e:
-                print(f"⚠️ Could not get genre suggestions: {e}")
+            # Step 5.1: Get intelligent instrument suggestions using our caching system
+            print("🎵 Getting intelligent instrument library data...")
             
-            # Load instruments using enhanced selection
-            enhanced_instrument_map = {
-                'drums': {
-                    'deep house': '64 Pads Dub Techno Kit.adg',
-                    'jazz': '32 Pad Kit Jazz.adg', 
-                    'trap': 'Drum Rack',
-                    'rock': '32 Pad Kit Rock.adg'
-                },
-                'bass': {
-                    'deep house': 'Bass',
-                    'jazz': 'Electric',
-                    'trap': 'Bass', 
-                    'rock': 'Bass'
-                },
-                'lead': {
-                    'deep house': 'Analog',
-                    'jazz': 'Electric',
-                    'trap': 'Analog',
-                    'rock': 'Analog'
-                },
-                'pads': {
-                    'deep house': 'Drift', 
-                    'jazz': 'Electric',
-                    'trap': 'Drift',
-                    'rock': 'Analog'
-                }
-            }
+            # Check if we need to update the instrument cache
+            if not self.instrument_manager.is_cache_valid():
+                print("🔄 Updating instrument cache from Ableton...")
+                cache_updated = await self.instrument_manager.update_cache_from_mcp(conn)
+                if cache_updated:
+                    print("✅ Instrument cache updated successfully")
+                else:
+                    print("⚠️ Could not update instrument cache, using existing data")
+            
+            # Get formatted instrument data for AI
+            available_instruments = self.instrument_manager.get_formatted_instrument_data_for_ai()
+            available_drum_kits = ""  # Included in available_instruments now
+            
+            # Extract genre from brief style
+            style = brief.style.lower()
+            genre = 'deep house'  # default
+            if any(x in style for x in ['jazz', 'swing', 'bebop']):
+                genre = 'jazz'
+            elif any(x in style for x in ['trap', 'hip hop', 'rap']):
+                genre = 'trap' 
+            elif any(x in style for x in ['rock', 'punk', 'metal']):
+                genre = 'rock'
+            elif any(x in style for x in ['house', 'techno', 'electronic', 'edm']):
+                genre = 'deep house'
+            elif any(x in style for x in ['afro']):
+                genre = 'afro house'
+            elif any(x in style for x in ['progressive']):
+                genre = 'progressive house'
+            elif any(x in style for x in ['tech']):
+                genre = 'tech house'
+            
+            # Get intelligent genre-specific suggestions
+            track_types = ['drums', 'bass', 'lead', 'pads']
+            suggestions = self.instrument_manager.suggest_instruments_for_genre(genre, track_types)
+            
+            print(f"🎯 Smart suggestions for {genre}:")
+            for track_type, recommendation in suggestions['recommendations'].items():
+                available = recommendation.get('available', [])
+                if available:
+                    print(f"  {track_type}: {available[0]} (+ {len(available)-1} alternatives)")
+                else:
+                    print(f"  {track_type}: {recommendation.get('fallback', 'Basic')} (fallback)")
+            
+            print(f"📊 Cache status: {suggestions['cache_status']}")
+            
+            # Load instruments using intelligent suggestions from InstrumentManager
             
             for track_name, track_info in track_setup.items():
                 try:
-                    # Use enhanced genre-specific instrument selection
+                    # Get intelligent suggestion for this track type
+                    track_suggestion = suggestions['recommendations'].get(track_name, {})
+                    
                     if track_name == 'drums':
-                        kit_name = enhanced_instrument_map['drums'].get(genre, 'Drum Rack')
+                        # Use the best available drum kit or fallback
+                        available_kits = track_suggestion.get('available', [])
+                        kit_name = available_kits[0] if available_kits else track_suggestion.get('fallback', 'Drum Rack')
+                        
                         result = conn.send_command('load_specific_drum_kit_by_name', {
                             'track_index': track_info['index'],
                             'kit_name': kit_name
                         })
-                        print(f"✅ Loaded {kit_name} on {track_name}")
-                    else:
-                        # Map track names to instrument categories
-                        instrument_category = track_name
-                        if track_name in ['lead', 'pads']:
-                            instrument_category = track_name
-                        elif track_name == 'bass':
-                            instrument_category = 'bass'
+                        
+                        # Enhanced validation of drum loading result
+                        if result and result.get('status') == 'success':
+                            print(f"✅ Loaded {kit_name} on {track_name}")
+                            actions.append({"action_type": "instrument", "description": f"Loaded {kit_name} drum kit"})
                         else:
-                            instrument_category = 'lead'  # fallback
+                            print(f"⚠️ Drum kit loading unclear, result: {result}")
                             
-                        instrument_name = enhanced_instrument_map[instrument_category].get(genre, 'Analog')
+                    else:
+                        # Use the best available instrument or fallback
+                        available_instruments = track_suggestion.get('available', [])
+                        instrument_name = available_instruments[0] if available_instruments else track_suggestion.get('fallback', 'Analog')
+                        
                         result = conn.send_command('load_specific_instrument_by_name', {
                             'track_index': track_info['index'],
                             'instrument_name': instrument_name
                         })
-                        print(f"✅ Loaded {instrument_name} on {track_name}")
+                        
+                        # Enhanced validation of instrument loading result
+                        if result and result.get('status') == 'success':
+                            print(f"✅ Loaded {instrument_name} on {track_name}")
+                            actions.append({"action_type": "instrument", "description": f"Loaded {instrument_name} on {track_name}"})
+                        else:
+                            print(f"⚠️ Instrument loading unclear, result: {result}")
                         
                 except Exception as e:
+                    logger.error(f"❌ Error loading instrument for {track_name}: {e}")
                     print(f"❌ Error loading instrument for {track_name}: {e}")
-                    # Fallback to basic loading
+                    
+                    # Enhanced fallback with better error reporting
                     try:
                         basic_map = {'drums': 'drums', 'bass': 'bass', 'lead': 'synth', 'pads': 'synth'}
+                        fallback_uri = basic_map.get(track_name, 'synth')
                         result = conn.send_command('load_instrument_or_effect', {
                             'track_index': track_info['index'],
-                            'uri': basic_map.get(track_name, 'synth')
+                            'uri': fallback_uri
                         })
-                        print(f"⚠️ Used fallback for {track_name}")
+                        
+                        if result and result.get('status') == 'success':
+                            print(f"⚠️ Used fallback {fallback_uri} for {track_name}")
+                            actions.append({"action_type": "instrument_fallback", "description": f"Used fallback {fallback_uri} for {track_name}"})
+                        else:
+                            print(f"❌ Fallback also unclear for {track_name}, result: {result}")
+                            logger.error(f"Fallback loading failed for {track_name}: {result}")
+                            
                     except Exception as fallback_error:
+                        logger.error(f"❌ Fallback also failed for {track_name}: {fallback_error}")
                         print(f"❌ Fallback also failed for {track_name}: {fallback_error}")
+                        actions.append({"action_type": "error", "description": f"All instrument loading failed for {track_name}"})
             
             # Step 6: AI experts iteratively create each section with sophisticated musical content
             for section_idx, section in enumerate(structure['sections']):
                 logger.info(f"🎵 Creating {section['name']} section with AI experts...")
                 
-                # Generate complete musical section using specialized AI experts
+                # Generate complete musical section using specialized AI experts with full instrument knowledge
                 expert_content = await expert_orchestrator.generate_complete_section(
                     style=brief.style,
                     key=brief.key,
                     bpm=brief.bpm,
                     section=section['name'],
                     bars=section['bars'],
-                    energy=section.get('energy', 'medium')
+                    energy=section.get('energy', 'medium'),
+                    available_instruments=available_instruments,
+                    available_drum_kits=available_drum_kits
                 )
                 
                 # Create the musical content in Ableton using expert-generated data
