@@ -105,7 +105,9 @@ class AbletonConnection:
             "create_midi_track", "create_audio_track", "set_track_name",
             "create_clip", "add_notes_to_clip", "set_clip_name",
             "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
-            "start_playback", "stop_playback", "load_instrument_or_effect"
+            "start_playback", "stop_playback", "load_instrument_or_effect",
+            "load_plugin_by_path", "delete_track", "clear_clip", "delete_clip",
+            "remove_notes_from_clip"
         ]
         
         try:
@@ -186,7 +188,6 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
 # Create the MCP server with lifespan support
 mcp = FastMCP(
     "AbletonMCP",
-    description="Ableton Live integration through the Model Context Protocol",
     lifespan=server_lifespan
 )
 
@@ -651,6 +652,160 @@ def load_drum_kit(ctx: Context, track_index: int, rack_uri: str, kit_path: str) 
     except Exception as e:
         logger.error(f"Error loading drum kit: {str(e)}")
         return f"Error loading drum kit: {str(e)}"
+
+@mcp.tool()
+def load_plugin_by_path(ctx: Context, track_index: int, plugin_path: str) -> str:
+    """
+    Load a plugin by navigating through the browser path directly.
+    
+    Parameters:
+    - track_index: The index of the track to load the plugin on
+    - plugin_path: Path to the plugin (e.g., 'plugins/vst3/arturia/analog lab v')
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("load_plugin_by_path", {
+            "track_index": track_index,
+            "plugin_path": plugin_path
+        })
+        return f"Loaded plugin '{result.get('plugin_name')}' on track {track_index}"
+    except Exception as e:
+        logger.error(f"Error loading plugin by path: {str(e)}")
+        return f"Error loading plugin by path: {str(e)}"
+
+@mcp.tool()
+def delete_track(ctx: Context, track_index: int) -> str:
+    """
+    Delete a track by its index.
+    
+    Parameters:
+    - track_index: The index of the track to delete (0-based)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("delete_track", {
+            "track_index": track_index
+        })
+        return f"Track deleted: {result}"
+    except Exception as e:
+        logger.error(f"Error deleting track: {str(e)}")
+        return f"Error deleting track: {str(e)}"
+
+@mcp.tool()
+def clear_clip(ctx: Context, track_index: int, clip_index: int) -> str:
+    """
+    Clear all notes from a clip without deleting the clip itself.
+    
+    Parameters:
+    - track_index: The index of the track containing the clip (0-based)
+    - clip_index: The index of the clip slot (0-based)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("clear_clip", {
+            "track_index": track_index,
+            "clip_index": clip_index
+        })
+        return f"Clip cleared: {result}"
+    except Exception as e:
+        logger.error(f"Error clearing clip: {str(e)}")
+        return f"Error clearing clip: {str(e)}"
+
+@mcp.tool()
+def delete_clip(ctx: Context, track_index: int, clip_index: int) -> str:
+    """
+    Delete a clip entirely from a clip slot.
+    
+    Parameters:
+    - track_index: The index of the track containing the clip (0-based)
+    - clip_index: The index of the clip slot (0-based)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("delete_clip", {
+            "track_index": track_index,
+            "clip_index": clip_index
+        })
+        return f"Clip deleted: {result}"
+    except Exception as e:
+        logger.error(f"Error deleting clip: {str(e)}")
+        return f"Error deleting clip: {str(e)}"
+
+@mcp.tool()
+def remove_notes_from_clip(ctx: Context, track_index: int, clip_index: int, notes_to_remove: list) -> str:
+    """
+    Remove specific notes from a clip based on criteria.
+    
+    Parameters:
+    - track_index: The index of the track containing the clip (0-based)
+    - clip_index: The index of the clip slot (0-based)
+    - notes_to_remove: List of note criteria to remove. Each item can contain:
+                      - pitch: MIDI note number to match
+                      - start_time: Start time to match (optional)
+                      - duration: Duration to match (optional)
+                      - velocity: Velocity to match (optional)
+    
+    Example: [{"pitch": 60}, {"pitch": 64, "start_time": 1.0}]
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("remove_notes_from_clip", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "notes_to_remove": notes_to_remove
+        })
+        return f"Notes removed: {result}"
+    except Exception as e:
+        logger.error(f"Error removing notes from clip: {str(e)}")
+        return f"Error removing notes from clip: {str(e)}"
+
+@mcp.tool()
+def get_device_parameters(ctx: Context, track_index: int, device_index: int = 0) -> str:
+    """
+    Get detailed information about a device's parameters.
+    
+    Parameters:
+    - track_index: The index of the track containing the device (0-based)
+    - device_index: The index of the device on the track (0-based, default: 0)
+    
+    Returns detailed information about all parameters including names, current values, ranges, and types.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_device_parameters", {
+            "track_index": track_index,
+            "device_index": device_index
+        })
+        return f"Device parameters: {result}"
+    except Exception as e:
+        logger.error(f"Error getting device parameters: {str(e)}")
+        return f"Error getting device parameters: {str(e)}"
+
+@mcp.tool()
+def set_device_parameter(ctx: Context, track_index: int, device_index: int, parameter_index: int, value: float) -> str:
+    """
+    Set a device parameter value.
+    
+    Parameters:
+    - track_index: The index of the track containing the device (0-based)
+    - device_index: The index of the device on the track (0-based)
+    - parameter_index: The index of the parameter to modify (0-based)
+    - value: The new parameter value (typically 0.0 - 1.0, but depends on parameter range)
+    
+    Use get_device_parameters first to discover available parameters and their valid ranges.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_device_parameter", {
+            "track_index": track_index,
+            "device_index": device_index,
+            "parameter_index": parameter_index,
+            "value": value
+        })
+        return f"Parameter set: {result}"
+    except Exception as e:
+        logger.error(f"Error setting device parameter: {str(e)}")
+        return f"Error setting device parameter: {str(e)}"
 
 # Main execution
 def main():
