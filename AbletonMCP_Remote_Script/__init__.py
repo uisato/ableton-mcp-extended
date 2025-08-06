@@ -234,7 +234,7 @@ class AbletonMCP(ControlSurface):
                                  "create_clip", "add_notes_to_clip", "set_clip_name", 
                                  "set_tempo", "fire_clip", "stop_clip",
                                  "start_playback", "stop_playback", "load_browser_item",
-                                 "load_plugin_by_path", "delete_track", "clear_clip", "delete_clip",
+                                 "load_plugin", "load_instrument_by_name", "delete_track", "clear_clip", "delete_clip",
                                  "remove_notes_from_clip", "set_device_parameter"]:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
@@ -288,10 +288,16 @@ class AbletonMCP(ControlSurface):
                             track_index = params.get("track_index", 0)
                             item_uri = params.get("item_uri", "")
                             result = self._load_browser_item(track_index, item_uri)
-                        elif command_type == "load_plugin_by_path":
+                        elif command_type == "load_plugin":
                             track_index = params.get("track_index", 0)
-                            plugin_path = params.get("plugin_path", "")
-                            result = self._load_plugin_by_path(track_index, plugin_path)
+                            plugin_name = params.get("plugin_name", "")
+                            plugin_type = params.get("plugin_type", None)
+                            result = self._load_plugin(track_index, plugin_name, plugin_type)
+                        elif command_type == "load_instrument_by_name":
+                            track_index = params.get("track_index", 0)
+                            instrument_name = params.get("instrument_name", "")
+                            category = params.get("category", "instruments")
+                            result = self._load_instrument_by_name(track_index, instrument_name, category)
                         elif command_type == "delete_track":
                             track_index = params.get("track_index", 0)
                             result = self._delete_track(track_index)
@@ -1114,13 +1120,14 @@ class AbletonMCP(ControlSurface):
             self.log_message(traceback.format_exc())
             raise
     
-    def _load_plugin_by_path(self, track_index, plugin_path):
+    def _load_plugin(self, track_index, plugin_name, plugin_type=None):
         """
-        Load a plugin by navigating through the browser path directly.
+        Load a plugin by name using intelligent search strategies.
         
         Args:
             track_index: The index of the track to load on
-            plugin_path: Path like "plugins/vst3/arturia/analog lab v"
+            plugin_name: Name of the plugin (e.g., 'analog lab v', 'serum', 'massive')
+            plugin_type: Optional plugin type filter ('vst3', 'vst', 'au', 'native')
         """
         try:
             if track_index < 0 or track_index >= len(self._song.tracks):
@@ -1133,57 +1140,619 @@ class AbletonMCP(ControlSurface):
             if not app or not hasattr(app, 'browser') or app.browser is None:
                 raise RuntimeError("Browser is not available in the Live application")
             
-            # Parse the path
-            path_parts = [p.lower() for p in plugin_path.split("/")]
-            if len(path_parts) < 4:  # plugins/vst3/vendor/plugin
-                raise ValueError("Plugin path must be in format 'plugins/vst3/vendor/plugin'")
+            # Normalize the plugin name
+            plugin_name = self._normalize_plugin_name(plugin_name)
             
-            # Navigate to plugins
-            current_item = app.browser.plugins if hasattr(app.browser, 'plugins') else None
-            if not current_item:
-                raise RuntimeError("Plugins category not available in browser")
+            # Try multiple loading strategies
+            result = None
+            strategies = [
+                ("fuzzy_search", self._load_plugin_fuzzy_search),
+                ("vendor_search", self._load_plugin_vendor_search),
+                ("name_search", self._load_plugin_name_search),
+                ("exact_path", self._load_plugin_exact_path)
+            ]
             
-            # Navigate through the path
-            for i in range(1, len(path_parts)):  # Skip 'plugins' as we already have it
-                part = path_parts[i]
-                if not part:  # Skip empty parts
+            for strategy_name, strategy_func in strategies:
+                try:
+                    self.log_message("Trying {0} strategy for plugin: {1}".format(strategy_name, plugin_name))
+                    result = strategy_func(app, track, plugin_name, plugin_type)
+                    if result and result.get("loaded", False):
+                        self.log_message("Successfully loaded plugin using {0} strategy".format(strategy_name))
+                        return result
+                except Exception as e:
+                    self.log_message("Strategy {0} failed: {1}".format(strategy_name, str(e)))
                     continue
-                
-                if not hasattr(current_item, 'children'):
-                    raise RuntimeError("Item at '{0}' has no children".format('/'.join(path_parts[:i+1])))
-                
-                found = False
-                for child in current_item.children:
-                    if hasattr(child, 'name') and child.name.lower() == part:
-                        current_item = child
-                        found = True
-                        break
-                
-                if not found:
-                    raise ValueError("Path part '{0}' not found in '{1}'".format(part, '/'.join(path_parts[:i+1])))
             
-            # Check if the final item is loadable
-            if not hasattr(current_item, 'is_loadable') or not current_item.is_loadable:
-                raise ValueError("Item '{0}' is not loadable".format(plugin_path))
-            
-            # Select the track
-            self._song.view.selected_track = track
-            
-            # Load the plugin
-            app.browser.load_item(current_item)
-            
-            result = {
-                "loaded": True,
-                "plugin_name": current_item.name if hasattr(current_item, 'name') else "Unknown",
-                "track_name": track.name,
-                "plugin_path": plugin_path
-            }
-            return result
+            # If all strategies failed, provide helpful error message
+            available_plugins = self._get_available_plugins_summary(app, plugin_type)
+            raise ValueError("Could not load plugin '{0}'. Available plugins: {1}".format(plugin_name, available_plugins))
             
         except Exception as e:
             self.log_message("Error loading plugin by path: {0}".format(str(e)))
             self.log_message(traceback.format_exc())
             raise
+    
+    def _normalize_plugin_name(self, plugin_name):
+        """Normalize plugin name to handle various input formats"""
+        # Remove common prefixes if they exist
+        prefixes_to_remove = ["plugins/", "vst3/", "vst/", "au/"]
+        normalized = plugin_name.lower().strip()
+        
+        for prefix in prefixes_to_remove:
+            if normalized.startswith(prefix):
+                normalized = normalized[len(prefix):]
+        
+        # Handle common variations
+        replacements = {
+            "analog lab v": "analog lab v",
+            "analog lab": "analog lab v",
+            "arturia analog": "analog lab v",
+            "serum": "serum",
+            "massive": "massive",
+            "sylenth": "sylenth1",
+            "sylenth1": "sylenth1"
+        }
+        
+        for old, new in replacements.items():
+            if normalized.endswith(old):
+                normalized = normalized.replace(old, new)
+                break
+        
+        return normalized
+    
+    def _load_plugin_exact_path(self, app, track, plugin_name, plugin_type=None):
+        """Load plugin using exact path navigation"""
+        path_parts = [p.strip() for p in plugin_name.split("/") if p.strip()]
+        
+        if len(path_parts) < 2:  # Need at least vendor/plugin
+            raise ValueError("Plugin path must have at least vendor/plugin format")
+        
+        # Navigate to plugins
+        current_item = app.browser.plugins if hasattr(app.browser, 'plugins') else None
+        if not current_item:
+            raise RuntimeError("Plugins category not available in browser")
+        
+        # Navigate through the path
+        for i, part in enumerate(path_parts):
+            if not hasattr(current_item, 'children'):
+                raise RuntimeError("Item at '{0}' has no children".format('/'.join(path_parts[:i+1])))
+            
+            found = False
+            for child in current_item.children:
+                if hasattr(child, 'name') and child.name.lower() == part.lower():
+                    current_item = child
+                    found = True
+                    break
+            
+            if not found:
+                raise ValueError("Path part '{0}' not found in '{1}'".format(part, '/'.join(path_parts[:i+1])))
+        
+        # Check if the final item is loadable
+        if not hasattr(current_item, 'is_loadable') or not current_item.is_loadable:
+            raise ValueError("Item '{0}' is not loadable".format(plugin_name))
+        
+        # Select the track and load
+        self._song.view.selected_track = track
+        app.browser.load_item(current_item)
+        
+        return {
+            "loaded": True,
+            "plugin_name": current_item.name if hasattr(current_item, 'name') else "Unknown",
+            "track_name": track.name,
+            "plugin_path": plugin_name,
+            "strategy": "exact_path"
+        }
+    
+    def _load_plugin_fuzzy_search(self, app, track, plugin_name, plugin_type=None):
+        """Load plugin using fuzzy search through all plugins"""
+        target_name = plugin_name.split("/")[-1].lower()  # Get just the plugin name
+        
+        # Search through all plugins
+        all_plugins = self._get_all_plugins(app, plugin_type)
+        
+        best_match = None
+        best_score = 0
+        
+        for plugin in all_plugins:
+            plugin_name_lower = plugin.get('name', '').lower()
+            score = self._calculate_similarity(target_name, plugin_name_lower)
+            
+            if score > best_score and score > 0.7:  # 70% similarity threshold
+                best_score = score
+                best_match = plugin
+        
+        if best_match:
+            # Navigate to the best match
+            current_item = app.browser.plugins
+            path_parts = best_match.get('path', '').split('/')
+            
+            for part in path_parts:
+                if not part or not hasattr(current_item, 'children'):
+                    continue
+                
+                for child in current_item.children:
+                    if hasattr(child, 'name') and child.name.lower() == part.lower():
+                        current_item = child
+                        break
+            
+            if hasattr(current_item, 'is_loadable') and current_item.is_loadable:
+                self._song.view.selected_track = track
+                app.browser.load_item(current_item)
+                
+                return {
+                    "loaded": True,
+                    "plugin_name": current_item.name if hasattr(current_item, 'name') else "Unknown",
+                    "track_name": track.name,
+                    "plugin_path": plugin_name,
+                    "strategy": "fuzzy_search",
+                    "match_score": best_score
+                }
+        
+        raise ValueError("No fuzzy match found for '{0}'".format(target_name))
+    
+    def _load_plugin_vendor_search(self, app, track, plugin_name, plugin_type=None):
+        """Load plugin by searching within specific vendor folders"""
+        path_parts = plugin_name.split("/")
+        if len(path_parts) < 2:
+            raise ValueError("Need vendor/plugin format")
+        
+        vendor_name = path_parts[0].lower()
+        target_plugin_name = path_parts[-1].lower()
+        
+        # Find vendor folder
+        current_item = app.browser.plugins
+        vendor_folder = None
+        
+        for child in current_item.children:
+            if hasattr(child, 'name') and child.name.lower() == vendor_name:
+                vendor_folder = child
+                break
+        
+        if not vendor_folder:
+            raise ValueError("Vendor '{0}' not found".format(vendor_name))
+        
+        # Search within vendor folder
+        if hasattr(vendor_folder, 'children'):
+            for plugin in vendor_folder.children:
+                if hasattr(plugin, 'name') and plugin.name.lower() == target_plugin_name:
+                    if hasattr(plugin, 'is_loadable') and plugin.is_loadable:
+                        self._song.view.selected_track = track
+                        app.browser.load_item(plugin)
+                        
+                        return {
+                            "loaded": True,
+                            "plugin_name": plugin.name,
+                            "track_name": track.name,
+                            "plugin_path": plugin_name,
+                            "strategy": "vendor_search"
+                        }
+        
+        raise ValueError("Plugin '{0}' not found in vendor '{1}'".format(target_plugin_name, vendor_name))
+    
+    def _load_plugin_name_search(self, app, track, plugin_name, plugin_type=None):
+        """Load plugin by searching for name across all vendors"""
+        target_name = plugin_name.split("/")[-1].lower()
+        
+        # Search through all plugins
+        current_item = app.browser.plugins
+        
+        def search_recursive(item, depth=0):
+            if depth > 5:  # Prevent infinite recursion
+                return None
+            
+            if hasattr(item, 'children'):
+                for child in item.children:
+                    if hasattr(child, 'name') and child.name.lower() == target_name:
+                        if hasattr(child, 'is_loadable') and child.is_loadable:
+                            return child
+                    
+                    # Recursive search
+                    result = search_recursive(child, depth + 1)
+                    if result:
+                        return result
+            
+            return None
+        
+        found_plugin = search_recursive(current_item)
+        
+        if found_plugin:
+            self._song.view.selected_track = track
+            app.browser.load_item(found_plugin)
+            
+            return {
+                "loaded": True,
+                "plugin_name": found_plugin.name,
+                "track_name": track.name,
+                "plugin_path": plugin_name,
+                "strategy": "name_search"
+            }
+        
+        raise ValueError("Plugin '{0}' not found in any vendor folder".format(target_name))
+    
+    def _get_all_plugins(self, app, plugin_type=None):
+        """Get a list of all available plugins with their paths, optionally filtered by type"""
+        plugins = []
+        current_item = app.browser.plugins
+        
+        def collect_plugins(item, path="", depth=0):
+            if hasattr(item, 'children'):
+                for child in item.children:
+                    child_path = path + "/" + child.name if path else child.name
+                    
+                    if hasattr(child, 'is_loadable') and child.is_loadable:
+                        # Apply plugin type filter if specified
+                        if plugin_type:
+                            # Simple type detection based on path
+                            child_path_lower = child_path.lower()
+                            if plugin_type.lower() == "vst3" and "vst3" in child_path_lower:
+                                plugins.append({
+                                    'name': child.name,
+                                    'path': child_path,
+                                    'full_path': child_path,
+                                    'type': 'vst3'
+                                })
+                            elif plugin_type.lower() == "vst" and "vst" in child_path_lower and "vst3" not in child_path_lower:
+                                plugins.append({
+                                    'name': child.name,
+                                    'path': child_path,
+                                    'full_path': child_path,
+                                    'type': 'vst'
+                                })
+                            elif plugin_type.lower() == "au" and "au" in child_path_lower:
+                                plugins.append({
+                                    'name': child.name,
+                                    'path': child_path,
+                                    'full_path': child_path,
+                                    'type': 'au'
+                                })
+                            elif plugin_type.lower() == "native" and ("vst" not in child_path_lower and "au" not in child_path_lower):
+                                plugins.append({
+                                    'name': child.name,
+                                    'path': child_path,
+                                    'full_path': child_path,
+                                    'type': 'native'
+                                })
+                        else:
+                            # No filter, include all plugins
+                            plugins.append({
+                                'name': child.name,
+                                'path': child_path,
+                                'full_path': child_path,
+                                'type': 'unknown'
+                            })
+                    elif depth < 3:  # Limit recursion depth
+                        collect_plugins(child, child_path, depth + 1)
+        
+        collect_plugins(current_item)
+        return plugins
+    
+    def _calculate_similarity(self, str1, str2):
+        """Calculate similarity between two strings (simple implementation)"""
+        # Simple similarity calculation
+        str1_words = set(str1.split())
+        str2_words = set(str2.split())
+        
+        if not str1_words or not str2_words:
+            return 0.0
+        
+        intersection = str1_words.intersection(str2_words)
+        union = str1_words.union(str2_words)
+        
+        return len(intersection) / len(union) if union else 0.0
+    
+    def _get_available_plugins_summary(self, app, plugin_type=None):
+        """Get a summary of available plugins for error messages"""
+        try:
+            plugins = self._get_all_plugins(app, plugin_type)
+            if len(plugins) > 10:
+                type_info = f" (filtered by {plugin_type})" if plugin_type else ""
+                return "Found {0} plugins{1} (showing first 10): {2}".format(
+                    len(plugins),
+                    type_info,
+                    ", ".join([p['name'] for p in plugins[:10]])
+                )
+            else:
+                type_info = f" (filtered by {plugin_type})" if plugin_type else ""
+                return "Available plugins{0}: {1}".format(
+                    type_info,
+                    ", ".join([p['name'] for p in plugins])
+                )
+        except:
+            return "Unable to list available plugins"
+    
+    def _load_instrument_by_name(self, track_index, instrument_name, category):
+        """
+        Load an instrument or effect by name using intelligent search strategies.
+        
+        Args:
+            track_index: The index of the track to load on
+            instrument_name: Name of the instrument or effect (e.g., 'wavetable', 'analog', 'reverb')
+            category: The category to search in ('instruments', 'audio_effects', 'midi_effects', 'drums')
+        """
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            
+            track = self._song.tracks[track_index]
+            
+            # Access the application's browser instance
+            app = self.application()
+            if not app or not hasattr(app, 'browser') or app.browser is None:
+                raise RuntimeError("Browser is not available in the Live application")
+            
+            # Normalize the instrument name
+            instrument_name = self._normalize_instrument_name(instrument_name)
+            
+            # Try multiple loading strategies
+            result = None
+            strategies = [
+                ("exact_search", self._load_instrument_exact_search),
+                ("fuzzy_search", self._load_instrument_fuzzy_search),
+                ("category_search", self._load_instrument_category_search)
+            ]
+            
+            for strategy_name, strategy_func in strategies:
+                try:
+                    self.log_message("Trying {0} strategy for {1}: {2}".format(strategy_name, category, instrument_name))
+                    result = strategy_func(app, track, instrument_name, category)
+                    if result and result.get("loaded", False):
+                        self.log_message("Successfully loaded {0} using {1} strategy".format(category, strategy_name))
+                        return result
+                except Exception as e:
+                    self.log_message("Strategy {0} failed: {1}".format(strategy_name, str(e)))
+                    continue
+            
+            # If all strategies failed, provide helpful error message
+            available_items = self._get_available_items_summary(app, category)
+            raise ValueError("Could not load {0} '{1}'. Available {2}: {3}".format(category, instrument_name, category, available_items))
+            
+        except Exception as e:
+            self.log_message("Error loading {0} by name: {1}".format(category, str(e)))
+            self.log_message(traceback.format_exc())
+            raise
+    
+    def _normalize_instrument_name(self, instrument_name):
+        """Normalize instrument name to handle various input formats"""
+        # Remove common prefixes if they exist
+        prefixes_to_remove = ["ableton ", "live ", "native "]
+        normalized = instrument_name.lower().strip()
+        
+        for prefix in prefixes_to_remove:
+            if normalized.startswith(prefix):
+                normalized = normalized[len(prefix):]
+        
+        # Handle common variations
+        replacements = {
+            "wavetable": "wavetable",
+            "analog": "analog",
+            "operator": "operator",
+            "collision": "collision",
+            "tension": "tension",
+            "electric": "electric",
+            "reverb": "reverb",
+            "delay": "delay",
+            "compressor": "compressor",
+            "eq": "eq eight",
+            "equalizer": "eq eight",
+            "filter": "auto filter",
+            "autofilter": "auto filter"
+        }
+        
+        for old, new in replacements.items():
+            if normalized == old:
+                normalized = new
+                break
+        
+        return normalized
+    
+    def _load_instrument_exact_search(self, app, track, instrument_name, category):
+        """Load instrument using exact name search"""
+        # Get the appropriate category from browser
+        category_map = {
+            "instruments": app.browser.instruments,
+            "audio_effects": app.browser.audio_effects,
+            "midi_effects": app.browser.midi_effects,
+            "drums": app.browser.drums
+        }
+        
+        if category not in category_map:
+            raise ValueError("Unknown category: {0}".format(category))
+        
+        current_item = category_map[category]
+        
+        # Search for exact match
+        def search_recursive(item, depth=0):
+            if depth > 5:  # Prevent infinite recursion
+                return None
+            
+            if hasattr(item, 'children'):
+                for child in item.children:
+                    if hasattr(child, 'name') and child.name.lower() == instrument_name.lower():
+                        if hasattr(child, 'is_loadable') and child.is_loadable:
+                            return child
+                    
+                    # Recursive search
+                    result = search_recursive(child, depth + 1)
+                    if result:
+                        return result
+            
+            return None
+        
+        found_item = search_recursive(current_item)
+        
+        if found_item:
+            self._song.view.selected_track = track
+            app.browser.load_item(found_item)
+            
+            return {
+                "loaded": True,
+                "item_name": found_item.name,
+                "track_name": track.name,
+                "instrument_name": instrument_name,
+                "category": category,
+                "strategy": "exact_search"
+            }
+        
+        raise ValueError("Exact match not found for '{0}' in {1}".format(instrument_name, category))
+    
+    def _load_instrument_fuzzy_search(self, app, track, instrument_name, category):
+        """Load instrument using fuzzy search"""
+        # Get the appropriate category from browser
+        category_map = {
+            "instruments": app.browser.instruments,
+            "audio_effects": app.browser.audio_effects,
+            "midi_effects": app.browser.midi_effects,
+            "drums": app.browser.drums
+        }
+        
+        if category not in category_map:
+            raise ValueError("Unknown category: {0}".format(category))
+        
+        current_item = category_map[category]
+        
+        # Get all items in the category
+        all_items = self._get_all_items_in_category(app, category)
+        
+        best_match = None
+        best_score = 0
+        
+        for item in all_items:
+            item_name = item.get('name', '').lower()
+            score = self._calculate_similarity(instrument_name, item_name)
+            
+            if score > best_score and score > 0.7:  # 70% similarity threshold
+                best_score = score
+                best_match = item
+        
+        if best_match:
+            # Navigate to the best match
+            item_path = best_match.get('path', '').split('/')
+            
+            for part in item_path:
+                if not part or not hasattr(current_item, 'children'):
+                    continue
+                
+                for child in current_item.children:
+                    if hasattr(child, 'name') and child.name.lower() == part.lower():
+                        current_item = child
+                        break
+            
+            if hasattr(current_item, 'is_loadable') and current_item.is_loadable:
+                self._song.view.selected_track = track
+                app.browser.load_item(current_item)
+                
+                return {
+                    "loaded": True,
+                    "item_name": current_item.name if hasattr(current_item, 'name') else "Unknown",
+                    "track_name": track.name,
+                    "instrument_name": instrument_name,
+                    "category": category,
+                    "strategy": "fuzzy_search",
+                    "match_score": best_score
+                }
+        
+        raise ValueError("No fuzzy match found for '{0}' in {1}".format(instrument_name, category))
+    
+    def _load_instrument_category_search(self, app, track, instrument_name, category):
+        """Load instrument by searching within the specified category"""
+        # Get the appropriate category from browser
+        category_map = {
+            "instruments": app.browser.instruments,
+            "audio_effects": app.browser.audio_effects,
+            "midi_effects": app.browser.midi_effects,
+            "drums": app.browser.drums
+        }
+        
+        if category not in category_map:
+            raise ValueError("Unknown category: {0}".format(category))
+        
+        current_item = category_map[category]
+        
+        # Search for the item in the category
+        def search_recursive(item, depth=0):
+            if depth > 5:  # Prevent infinite recursion
+                return None
+            
+            if hasattr(item, 'children'):
+                for child in item.children:
+                    if hasattr(child, 'name') and child.name.lower() == instrument_name.lower():
+                        if hasattr(child, 'is_loadable') and child.is_loadable:
+                            return child
+                    
+                    # Recursive search
+                    result = search_recursive(child, depth + 1)
+                    if result:
+                        return result
+            
+            return None
+        
+        found_item = search_recursive(current_item)
+        
+        if found_item:
+            self._song.view.selected_track = track
+            app.browser.load_item(found_item)
+            
+            return {
+                "loaded": True,
+                "item_name": found_item.name,
+                "track_name": track.name,
+                "instrument_name": instrument_name,
+                "category": category,
+                "strategy": "category_search"
+            }
+        
+        raise ValueError("Item '{0}' not found in {1}".format(instrument_name, category))
+    
+    def _get_all_items_in_category(self, app, category):
+        """Get a list of all available items in a category"""
+        items = []
+        
+        category_map = {
+            "instruments": app.browser.instruments,
+            "audio_effects": app.browser.audio_effects,
+            "midi_effects": app.browser.midi_effects,
+            "drums": app.browser.drums
+        }
+        
+        if category not in category_map:
+            return items
+        
+        current_item = category_map[category]
+        
+        def collect_items(item, path=""):
+            if hasattr(item, 'children'):
+                for child in item.children:
+                    child_path = path + "/" + child.name if path else child.name
+                    
+                    if hasattr(child, 'is_loadable') and child.is_loadable:
+                        items.append({
+                            'name': child.name,
+                            'path': child_path,
+                            'full_path': child_path
+                        })
+                    else:
+                        collect_items(child, child_path)
+        
+        collect_items(current_item)
+        return items
+    
+    def _get_available_items_summary(self, app, category):
+        """Get a summary of available items in a category for error messages"""
+        try:
+            items = self._get_all_items_in_category(app, category)
+            if len(items) > 10:
+                return "Found {0} {1} (showing first 10): {2}".format(
+                    len(items),
+                    category,
+                    ", ".join([i['name'] for i in items[:10]])
+                )
+            else:
+                return "Available {0}: {1}".format(
+                    category,
+                    ", ".join([i['name'] for i in items])
+                )
+        except:
+            return "Unable to list available {0}".format(category)
     
     def _delete_track(self, track_index):
         """

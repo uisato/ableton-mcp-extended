@@ -106,7 +106,7 @@ class AbletonConnection:
             "create_clip", "add_notes_to_clip", "set_clip_name",
             "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
             "start_playback", "stop_playback", "load_instrument_or_effect",
-            "load_plugin_by_path", "delete_track", "clear_clip", "delete_clip",
+            "load_plugin", "load_instrument_by_name", "delete_track", "clear_clip", "delete_clip",
             "remove_notes_from_clip"
         ]
         
@@ -409,34 +409,50 @@ def set_tempo(ctx: Context, tempo: float) -> str:
 
 
 @mcp.tool()
-def load_instrument_or_effect(ctx: Context, track_index: int, uri: str) -> str:
+def load_instrument_or_effect(ctx: Context, track_index: int, name: str = None, uri: str = None, category: str = "instruments") -> str:
     """
-    Load an instrument or effect onto a track using its URI.
+    Load an instrument or effect onto a track using its name or URI.
     
     Parameters:
     - track_index: The index of the track to load the instrument on
-    - uri: The URI of the instrument or effect to load (e.g., 'query:Synths#Instrument%20Rack:Bass:FileId_5116')
+    - name: The name of the instrument or effect to load (e.g., 'wavetable', 'analog', 'reverb')
+    - uri: The URI of the instrument or effect to load (e.g., 'query:Synths#Wavetable')
+    - category: The category to search in ('instruments', 'audio_effects', 'midi_effects', 'drums')
+    
+    Either name or uri must be provided. If name is provided, the command will search for it in the specified category.
     """
     try:
         ableton = get_ableton_connection()
-        result = ableton.send_command("load_browser_item", {
-            "track_index": track_index,
-            "item_uri": uri
-        })
+        
+        if name and not uri:
+            # Use the new load_instrument_by_name command
+            result = ableton.send_command("load_instrument_by_name", {
+                "track_index": track_index,
+                "instrument_name": name,
+                "category": category
+            })
+        elif uri and not name:
+            # Use the existing load_browser_item command
+            result = ableton.send_command("load_browser_item", {
+                "track_index": track_index,
+                "item_uri": uri
+            })
+        else:
+            return "Error: Please provide either 'name' or 'uri', not both"
         
         # Check if the instrument was loaded successfully
         if result.get("loaded", False):
             new_devices = result.get("new_devices", [])
             if new_devices:
-                return f"Loaded instrument with URI '{uri}' on track {track_index}. New devices: {', '.join(new_devices)}"
+                return f"Loaded {category} '{name or uri}' on track {track_index}. New devices: {', '.join(new_devices)}"
             else:
                 devices = result.get("devices_after", [])
-                return f"Loaded instrument with URI '{uri}' on track {track_index}. Devices on track: {', '.join(devices)}"
+                return f"Loaded {category} '{name or uri}' on track {track_index}. Devices on track: {', '.join(devices)}"
         else:
-            return f"Failed to load instrument with URI '{uri}'"
+            return f"Failed to load {category} '{name or uri}'"
     except Exception as e:
-        logger.error(f"Error loading instrument by URI: {str(e)}")
-        return f"Error loading instrument by URI: {str(e)}"
+        logger.error(f"Error loading {category}: {str(e)}")
+        return f"Error loading {category}: {str(e)}"
 
 @mcp.tool()
 def fire_clip(ctx: Context, track_index: int, clip_index: int) -> str:
@@ -654,24 +670,34 @@ def load_drum_kit(ctx: Context, track_index: int, rack_uri: str, kit_path: str) 
         return f"Error loading drum kit: {str(e)}"
 
 @mcp.tool()
-def load_plugin_by_path(ctx: Context, track_index: int, plugin_path: str) -> str:
+def load_plugin(ctx: Context, track_index: int, plugin_name: str, plugin_type: str = None) -> str:
     """
-    Load a plugin by navigating through the browser path directly.
+    Load a plugin by name using intelligent search strategies.
     
     Parameters:
     - track_index: The index of the track to load the plugin on
-    - plugin_path: Path to the plugin (e.g., 'plugins/vst3/arturia/analog lab v')
+    - plugin_name: Name of the plugin (e.g., 'analog lab v', 'serum', 'massive')
+    - plugin_type: Optional plugin type filter ('vst3', 'vst', 'au', 'native') to narrow search
+    
+    The command uses multiple strategies:
+    1. Fuzzy search with similarity matching
+    2. Vendor-specific search
+    3. Global name search
+    4. Exact path navigation (if full path provided)
+    
+    Returns detailed information about which strategy succeeded.
     """
     try:
         ableton = get_ableton_connection()
-        result = ableton.send_command("load_plugin_by_path", {
+        result = ableton.send_command("load_plugin", {
             "track_index": track_index,
-            "plugin_path": plugin_path
+            "plugin_name": plugin_name,
+            "plugin_type": plugin_type
         })
-        return f"Loaded plugin '{result.get('plugin_name')}' on track {track_index}"
+        return f"Loaded plugin '{result.get('plugin_name')}' on track {track_index} using {result.get('strategy', 'unknown')} strategy"
     except Exception as e:
-        logger.error(f"Error loading plugin by path: {str(e)}")
-        return f"Error loading plugin by path: {str(e)}"
+        logger.error(f"Error loading plugin: {str(e)}")
+        return f"Error loading plugin: {str(e)}"
 
 @mcp.tool()
 def delete_track(ctx: Context, track_index: int) -> str:
