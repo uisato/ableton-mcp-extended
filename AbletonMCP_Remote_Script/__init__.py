@@ -326,6 +326,42 @@ class AbletonMCP(ControlSurface):
             elif command_type == "get_browser_items_at_path":
                 path = params.get("path", "")
                 response["result"] = self.get_browser_items_at_path(path)
+            elif command_type in ["create_audio_track", "load_audio_clip", "place_clip_in_arrangement"]:
+                response_queue = queue.Queue()
+                def main_thread_task_audio():
+                    try:
+                        result = None
+                        if command_type == "create_audio_track":
+                            index = params.get("index", -1)
+                            result = self._create_audio_track(index)
+                        elif command_type == "load_audio_clip":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            file_path = params.get("file_path", "")
+                            result = self._load_audio_clip(track_index, clip_index, file_path)
+                        elif command_type == "place_clip_in_arrangement":
+                            track_index = params.get("track_index", 0)
+                            arrangement_time = params.get("arrangement_time", 0.0)
+                            result = self._place_clip_in_arrangement(track_index, arrangement_time)
+                        response_queue.put({"status": "success", "result": result})
+                    except Exception as e:
+                        self.log_message("Error in audio task: " + str(e))
+                        self.log_message(traceback.format_exc())
+                        response_queue.put({"status": "error", "message": str(e)})
+                try:
+                    self.schedule_message(0, main_thread_task_audio)
+                except AssertionError:
+                    main_thread_task_audio()
+                try:
+                    task_response = response_queue.get(timeout=15.0)
+                    if task_response.get("status") == "error":
+                        response["status"] = "error"
+                        response["message"] = task_response.get("message", "Unknown error")
+                    else:
+                        response["result"] = task_response.get("result", {})
+                except queue.Empty:
+                    response["status"] = "error"
+                    response["message"] = "Timeout waiting for audio operation"
             else:
                 response["status"] = "error"
                 response["message"] = "Unknown command: " + command_type
@@ -414,6 +450,39 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error getting track info: " + str(e))
             raise
     
+    def _create_audio_track(self, index):
+        """Create a new audio track at the specified index"""
+        self._song.create_audio_track(index)
+        new_index = len(self._song.tracks) - 1 if index == -1 else index
+        track = self._song.tracks[new_index]
+        return {"index": new_index, "name": track.name}
+
+    def _load_audio_clip(self, track_index, clip_index, file_path):
+        """Load a WAV/audio file into a clip slot"""
+        import os
+        file_path = os.path.abspath(file_path)
+        if not os.path.exists(file_path):
+            raise Exception("File not found: " + file_path)
+        track = self._song.tracks[track_index]
+        clip_slot = track.clip_slots[clip_index]
+        clip_slot.create_audio_clip(file_path)
+        clip = clip_slot.clip
+        return {"loaded": True, "file": file_path, "clip_name": clip.name if clip else "", "length": clip.length if clip else 0}
+
+    def _place_clip_in_arrangement(self, track_index, arrangement_time):
+        """Place audio clip into arrangement view using the correct Ableton 12 API.
+        The C++ signature is: create_audio_clip(TString file_path, double start_time)
+        """
+        track = self._song.tracks[track_index]
+        # Get file path from session view clip
+        clip_slot = track.clip_slots[0]
+        if not clip_slot.has_clip:
+            raise Exception("No clip in session slot 0 for track index " + str(track_index))
+        file_path = clip_slot.clip.file_path
+        # Place directly into arrangement with correct signature
+        track.create_audio_clip(file_path, float(arrangement_time))
+        return {"placed": True, "track": track.name, "file": file_path, "time": arrangement_time}
+
     def _create_midi_track(self, index):
         """Create a new MIDI track at the specified index"""
         try:
