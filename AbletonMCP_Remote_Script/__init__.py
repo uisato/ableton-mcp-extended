@@ -7,6 +7,7 @@ import json
 import threading
 import time
 import traceback
+import math
 
 # Change queue import for Python 2
 try:
@@ -225,9 +226,13 @@ class AbletonMCP(ControlSurface):
             elif command_type == "get_track_info":
                 track_index = params.get("track_index", 0)
                 response["result"] = self._get_track_info(track_index)
+            elif command_type == "get_master_meter":
+                response["result"] = self._get_master_meter()
             # Commands that modify Live's state should be scheduled on the main thread
-            elif command_type in ["create_midi_track", "set_track_name", 
-                                 "create_clip", "add_notes_to_clip", "set_clip_name", 
+            elif command_type in ["create_midi_track", "set_track_name",
+                                 "set_track_volume", "set_track_panning",
+                                 "get_device_parameters", "set_device_parameter",
+                                 "create_clip", "add_notes_to_clip", "set_clip_name",
                                  "set_tempo", "fire_clip", "stop_clip",
                                  "start_playback", "stop_playback", "load_browser_item"]:
                 # Use a thread-safe approach with a response queue
@@ -244,6 +249,24 @@ class AbletonMCP(ControlSurface):
                             track_index = params.get("track_index", 0)
                             name = params.get("name", "")
                             result = self._set_track_name(track_index, name)
+                        elif command_type == "set_track_volume":
+                            track_index = params.get("track_index", 0)
+                            volume = params.get("volume", 0.85)
+                            result = self._set_track_volume(track_index, volume)
+                        elif command_type == "set_track_panning":
+                            track_index = params.get("track_index", 0)
+                            panning = params.get("panning", 0.0)
+                            result = self._set_track_panning(track_index, panning)
+                        elif command_type == "get_device_parameters":
+                            track_index = params.get("track_index", 0)
+                            device_index = params.get("device_index", 0)
+                            result = self._get_device_parameters(track_index, device_index)
+                        elif command_type == "set_device_parameter":
+                            track_index = params.get("track_index", 0)
+                            device_index = params.get("device_index", 0)
+                            parameter_index = params.get("parameter_index", 0)
+                            value = params.get("value", 0.0)
+                            result = self._set_device_parameter(track_index, device_index, parameter_index, value)
                         elif command_type == "create_clip":
                             track_index = params.get("track_index", 0)
                             clip_index = params.get("clip_index", 0)
@@ -326,6 +349,42 @@ class AbletonMCP(ControlSurface):
             elif command_type == "get_browser_items_at_path":
                 path = params.get("path", "")
                 response["result"] = self.get_browser_items_at_path(path)
+            elif command_type in ["create_audio_track", "load_audio_clip", "place_clip_in_arrangement"]:
+                response_queue = queue.Queue()
+                def main_thread_task_audio():
+                    try:
+                        result = None
+                        if command_type == "create_audio_track":
+                            index = params.get("index", -1)
+                            result = self._create_audio_track(index)
+                        elif command_type == "load_audio_clip":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            file_path = params.get("file_path", "")
+                            result = self._load_audio_clip(track_index, clip_index, file_path)
+                        elif command_type == "place_clip_in_arrangement":
+                            track_index = params.get("track_index", 0)
+                            arrangement_time = params.get("arrangement_time", 0.0)
+                            result = self._place_clip_in_arrangement(track_index, arrangement_time)
+                        response_queue.put({"status": "success", "result": result})
+                    except Exception as e:
+                        self.log_message("Error in audio task: " + str(e))
+                        self.log_message(traceback.format_exc())
+                        response_queue.put({"status": "error", "message": str(e)})
+                try:
+                    self.schedule_message(0, main_thread_task_audio)
+                except AssertionError:
+                    main_thread_task_audio()
+                try:
+                    task_response = response_queue.get(timeout=15.0)
+                    if task_response.get("status") == "error":
+                        response["status"] = "error"
+                        response["message"] = task_response.get("message", "Unknown error")
+                    else:
+                        response["result"] = task_response.get("result", {})
+                except queue.Empty:
+                    response["status"] = "error"
+                    response["message"] = "Timeout waiting for audio operation"
             else:
                 response["status"] = "error"
                 response["message"] = "Unknown command: " + command_type
@@ -357,6 +416,48 @@ class AbletonMCP(ControlSurface):
             return result
         except Exception as e:
             self.log_message("Error getting session info: " + str(e))
+            raise
+
+    def _safe_float(self, value):
+        """Convert a value to float, returning None when unavailable."""
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _linear_to_db(self, value):
+        """Convert a linear meter value to dBFS."""
+        linear = self._safe_float(value)
+        if linear is None:
+            return None
+        if linear <= 0.0:
+            return -120.0
+        return 20.0 * math.log10(linear)
+
+    def _get_master_meter(self):
+        """Get current master meter values and clipping state."""
+        try:
+            master = self._song.master_track
+            left = self._safe_float(getattr(master, "output_meter_left", None))
+            right = self._safe_float(getattr(master, "output_meter_right", None))
+            level = self._safe_float(getattr(master, "output_meter_level", None))
+            numeric_values = [v for v in [left, right, level] if v is not None]
+            peak = max(numeric_values) if numeric_values else 0.0
+
+            return {
+                "left_linear": left,
+                "right_linear": right,
+                "level_linear": level,
+                "peak_linear": peak,
+                "left_db": self._linear_to_db(left),
+                "right_db": self._linear_to_db(right),
+                "level_db": self._linear_to_db(level),
+                "peak_db": self._linear_to_db(peak),
+                "is_clipping": peak >= 1.0,
+                "clip_threshold_linear": 1.0
+            }
+        except Exception as e:
+            self.log_message("Error getting master meter: " + str(e))
             raise
     
     def _get_track_info(self, track_index):
@@ -414,6 +515,39 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error getting track info: " + str(e))
             raise
     
+    def _create_audio_track(self, index):
+        """Create a new audio track at the specified index"""
+        self._song.create_audio_track(index)
+        new_index = len(self._song.tracks) - 1 if index == -1 else index
+        track = self._song.tracks[new_index]
+        return {"index": new_index, "name": track.name}
+
+    def _load_audio_clip(self, track_index, clip_index, file_path):
+        """Load a WAV/audio file into a clip slot"""
+        import os
+        file_path = os.path.abspath(file_path)
+        if not os.path.exists(file_path):
+            raise Exception("File not found: " + file_path)
+        track = self._song.tracks[track_index]
+        clip_slot = track.clip_slots[clip_index]
+        clip_slot.create_audio_clip(file_path)
+        clip = clip_slot.clip
+        return {"loaded": True, "file": file_path, "clip_name": clip.name if clip else "", "length": clip.length if clip else 0}
+
+    def _place_clip_in_arrangement(self, track_index, arrangement_time):
+        """Place audio clip into arrangement view using the correct Ableton 12 API.
+        The C++ signature is: create_audio_clip(TString file_path, double start_time)
+        """
+        track = self._song.tracks[track_index]
+        # Get file path from session view clip
+        clip_slot = track.clip_slots[0]
+        if not clip_slot.has_clip:
+            raise Exception("No clip in session slot 0 for track index " + str(track_index))
+        file_path = clip_slot.clip.file_path
+        # Place directly into arrangement with correct signature
+        track.create_audio_clip(file_path, float(arrangement_time))
+        return {"placed": True, "track": track.name, "file": file_path, "time": arrangement_time}
+
     def _create_midi_track(self, index):
         """Create a new MIDI track at the specified index"""
         try:
@@ -452,6 +586,90 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error setting track name: " + str(e))
             raise
     
+    def _set_track_volume(self, track_index, volume):
+        """Set the volume of a track (0.0 to 1.0)"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            track = self._song.tracks[track_index]
+            volume = max(0.0, min(1.0, float(volume)))
+            track.mixer_device.volume.value = volume
+            return {"track_index": track_index, "volume": track.mixer_device.volume.value}
+        except Exception as e:
+            self.log_message("Error setting track volume: " + str(e))
+            raise
+
+    def _set_track_panning(self, track_index, panning):
+        """Set the panning of a track (-1.0 = left, 0.0 = center, 1.0 = right)"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            track = self._song.tracks[track_index]
+            panning = max(-1.0, min(1.0, float(panning)))
+            track.mixer_device.panning.value = panning
+            return {"track_index": track_index, "panning": track.mixer_device.panning.value}
+        except Exception as e:
+            self.log_message("Error setting track panning: " + str(e))
+            raise
+
+    def _get_device_parameters(self, track_index, device_index):
+        """Get all parameters of a device on a track"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            track = self._song.tracks[track_index]
+            if device_index < 0 or device_index >= len(track.devices):
+                raise IndexError("Device index out of range")
+            device = track.devices[device_index]
+            params = []
+            for i, param in enumerate(device.parameters):
+                try:
+                    default_val = param.default_value
+                except:
+                    default_val = None
+                params.append({
+                    "index": i,
+                    "name": param.name,
+                    "value": param.value,
+                    "min": param.min,
+                    "max": param.max,
+                    "default": default_val,
+                    "is_quantized": param.is_quantized
+                })
+            return {
+                "device_name": device.name,
+                "class_name": device.class_name,
+                "parameters": params
+            }
+        except Exception as e:
+            self.log_message("Error getting device parameters: " + str(e))
+            raise
+
+    def _set_device_parameter(self, track_index, device_index, parameter_index, value):
+        """Set a specific parameter on a device"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            track = self._song.tracks[track_index]
+            if device_index < 0 or device_index >= len(track.devices):
+                raise IndexError("Device index out of range")
+            device = track.devices[device_index]
+            if parameter_index < 0 or parameter_index >= len(device.parameters):
+                raise IndexError("Parameter index out of range")
+            param = device.parameters[parameter_index]
+            value = max(param.min, min(param.max, float(value)))
+            param.value = value
+            return {
+                "device": device.name,
+                "parameter": param.name,
+                "value": param.value,
+                "min": param.min,
+                "max": param.max
+            }
+        except Exception as e:
+            self.log_message("Error setting device parameter: " + str(e))
+            raise
+
     def _create_clip(self, track_index, clip_index, length):
         """Create a new MIDI clip in the specified track and clip slot"""
         try:
