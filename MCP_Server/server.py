@@ -186,7 +186,7 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
 # Create the MCP server with lifespan support
 mcp = FastMCP(
     "AbletonMCP",
-    description="Ableton Live integration through the Model Context Protocol",
+    instructions="Ableton Live integration through the Model Context Protocol",
     lifespan=server_lifespan
 )
 
@@ -286,6 +286,19 @@ def get_track_info(ctx: Context, track_index: int) -> str:
         return f"Error getting track info: {str(e)}"
 
 @mcp.tool()
+def get_master_meter(ctx: Context) -> str:
+    """
+    Get real-time master output meter values and clipping status.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_master_meter")
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting master meter from Ableton: {str(e)}")
+        return f"Error getting master meter: {str(e)}"
+
+@mcp.tool()
 def create_midi_track(ctx: Context, index: int = -1) -> str:
     """
     Create a new MIDI track in the Ableton session.
@@ -320,10 +333,85 @@ def set_track_name(ctx: Context, track_index: int, name: str) -> str:
         return f"Error setting track name: {str(e)}"
 
 @mcp.tool()
+def set_track_volume(ctx: Context, track_index: int, volume: float) -> str:
+    """
+    Set the volume of a track.
+
+    Parameters:
+    - track_index: The index of the track
+    - volume: Volume level from 0.0 to 1.0
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_track_volume", {"track_index": track_index, "volume": volume})
+        return json.dumps(result)
+    except Exception as e:
+        logger.error(f"Error setting track volume: {str(e)}")
+        return f"Error setting track volume: {str(e)}"
+
+@mcp.tool()
+def set_track_panning(ctx: Context, track_index: int, panning: float) -> str:
+    """
+    Set the panning of a track.
+
+    Parameters:
+    - track_index: The index of the track
+    - panning: Panning from -1.0 (full left) to 1.0 (full right), 0.0 is center
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_track_panning", {"track_index": track_index, "panning": panning})
+        return json.dumps(result)
+    except Exception as e:
+        logger.error(f"Error setting track panning: {str(e)}")
+        return f"Error setting track panning: {str(e)}"
+
+@mcp.tool()
+def get_device_parameters(ctx: Context, track_index: int, device_index: int) -> str:
+    """
+    Get all parameters of a device on a track.
+
+    Parameters:
+    - track_index: The index of the track containing the device
+    - device_index: The index of the device on the track
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_device_parameters", {
+            "track_index": track_index, "device_index": device_index
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting device parameters: {str(e)}")
+        return f"Error getting device parameters: {str(e)}"
+
+@mcp.tool()
+def set_device_parameter(ctx: Context, track_index: int, device_index: int, parameter_index: int, value: float) -> str:
+    """
+    Set a specific parameter on a device.
+
+    Parameters:
+    - track_index: The index of the track containing the device
+    - device_index: The index of the device on the track
+    - parameter_index: The index of the parameter to set
+    - value: The value to set the parameter to (will be clamped to valid range)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_device_parameter", {
+            "track_index": track_index, "device_index": device_index,
+            "parameter_index": parameter_index, "value": value
+        })
+        return json.dumps(result)
+    except Exception as e:
+        logger.error(f"Error setting device parameter: {str(e)}")
+        return f"Error setting device parameter: {str(e)}"
+
+@mcp.tool()
 def create_clip(ctx: Context, track_index: int, clip_index: int, length: float = 4.0) -> str:
     """
     Create a new MIDI clip in the specified track and clip slot.
-    
+
     Parameters:
     - track_index: The index of the track to create the clip in
     - clip_index: The index of the clip slot to create the clip in
