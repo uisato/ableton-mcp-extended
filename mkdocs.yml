@@ -1,0 +1,73 @@
+site_name: Ableton MCP Extended
+site_description: Control Ableton Live using natural language via AI assistants
+site_author: MarvinHauke
+site_url: https://github.com/MarvinHauke/ableton-mcp-extended
+
+repo_name: MarvinHauke/ableton-mcp-extended
+repo_url: https://github.com/MarvinHauke/ableton-mcp-extended
+
+theme:
+  name: material
+  palette:
+    # Palette toggle for light mode
+    - scheme: default
+      primary: deep purple
+      accent: purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Palette toggle for dark mode
+    - scheme: slate
+      primary: deep purple
+      accent: purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - admonition
+  - pymdownx.details
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: installation.md
+      - Quick Start: quickstart.md
+  - Features:
+      - Overview: features/overview.md
+      - Session Control: features/session-control.md
+      - Track Management: features/track-management.md
+      - MIDI & Clips: features/midi-clips.md
+      - Device Control: features/device-control.md
+      - Browser Integration: features/browser.md
+  - Advanced:
+      - ElevenLabs Integration: advanced/elevenlabs.md
+      - UDP High Performance: advanced/udp-server.md
+      - Custom Tools: advanced/custom-tools.md
+  - API Reference: api-reference.md
+  - Contributing: contributing.md
+  - Roadmap: roadmap.md
+
+plugins:
+  - search

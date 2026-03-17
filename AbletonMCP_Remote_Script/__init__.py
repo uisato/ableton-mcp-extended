@@ -229,7 +229,8 @@ class AbletonMCP(ControlSurface):
             elif command_type in ["create_midi_track", "set_track_name", 
                                  "create_clip", "add_notes_to_clip", "set_clip_name", 
                                  "set_tempo", "fire_clip", "stop_clip",
-                                 "start_playback", "stop_playback", "load_browser_item"]:
+                                 "start_playback", "stop_playback", "load_instrument_or_effect", 
+                                 "load_browser_item", "create_scene"]:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
@@ -282,6 +283,9 @@ class AbletonMCP(ControlSurface):
                             track_index = params.get("track_index", 0)
                             item_uri = params.get("item_uri", "")
                             result = self._load_browser_item(track_index, item_uri)
+                        elif command_type == "create_scene":
+                            index = params.get("index", -1)
+                            result = self._create_scene(index)
                         
                         # Put the result in the queue
                         response_queue.put({"status": "success", "result": result})
@@ -758,6 +762,28 @@ class AbletonMCP(ControlSurface):
             self.log_message(traceback.format_exc())
             raise
     
+    def _create_scene(self, index):
+        """Create a new scene"""
+        try:
+            if index == -1:
+                # Add at end
+                self._song.create_scene(len(self._song.scenes))
+                actual_index = len(self._song.scenes) - 1
+            else:
+                self._song.create_scene(index)
+                actual_index = index
+            
+            scene = self._song.scenes[actual_index]
+            
+            result = {
+                "index": actual_index,
+                "name": scene.name
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error creating scene: " + str(e))
+            raise
+
     def _find_browser_item_by_uri(self, browser_or_item, uri, max_depth=10, current_depth=0):
         """Find a browser item by its URI"""
         try:

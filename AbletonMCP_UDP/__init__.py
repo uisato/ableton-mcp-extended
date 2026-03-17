@@ -388,10 +388,53 @@ class AbletonMCP(ControlSurface):
     def _load_instrument_or_effect(self, track_index, item_uri): self.log_message("_load_instrument_or_effect called"); return {"status": "ok_placeholder"}
     def _add_clip_envelope_point(self, track_index, clip_index, device_index, parameter_index, time_val, value, curve_type): self.log_message("_add_clip_envelope_point called"); return {"status": "ok_placeholder"}
     def _clear_clip_envelope(self, track_index, clip_index, device_index, parameter_index): self.log_message("_clear_clip_envelope called"); return {"status": "ok_placeholder"}
-    def _create_scene(self, index): self.log_message("_create_scene called"); return {"status": "ok_placeholder"}
-    def _set_scene_name(self, index, name): self.log_message("_set_scene_name called"); return {"status": "ok_placeholder"}
-    def _delete_scene(self, index): self.log_message("_delete_scene called"); return {"status": "ok_placeholder"}
-    def _fire_scene(self, index): self.log_message("_fire_scene called"); return {"status": "ok_placeholder"}
+    def _create_scene(self, index):
+        try:
+            if index == -1:
+                # Add at end
+                self._song.create_scene(len(self._song.scenes))
+                actual_index = len(self._song.scenes) - 1
+            else:
+                self._song.create_scene(index)
+                actual_index = index
+            scene = self._song.scenes[actual_index]
+            return {"index": actual_index, "name": scene.name}
+        except Exception as e:
+            self.log_message(f"Error creating scene: {e}")
+            raise
+
+    def _set_scene_name(self, index, name):
+        try:
+            if not (0 <= index < len(self._song.scenes)):
+                raise IndexError(f"Scene index {index} out of range")
+            scene = self._song.scenes[index]
+            scene.name = name
+            return {"index": index, "name": scene.name}
+        except Exception as e:
+            self.log_message(f"Error setting scene name: {e}")
+            raise
+
+    def _delete_scene(self, index):
+        try:
+            if not (0 <= index < len(self._song.scenes)):
+                raise IndexError(f"Scene index {index} out of range")
+            scene_name = self._song.scenes[index].name
+            self._song.delete_scene(index)
+            return {"index": index, "name": scene_name, "deleted": True}
+        except Exception as e:
+            self.log_message(f"Error deleting scene: {e}")
+            raise
+
+    def _fire_scene(self, index):
+        try:
+            if not (0 <= index < len(self._song.scenes)):
+                raise IndexError(f"Scene index {index} out of range")
+            scene = self._song.scenes[index]
+            scene.fire()
+            return {"index": index, "name": scene.name, "fired": True}
+        except Exception as e:
+            self.log_message(f"Error firing scene: {e}")
+            raise
     def _batch_edit_notes_in_clip(self, track_index, clip_index, note_ids, note_data_array): self.log_message("_batch_edit_notes_in_clip called"); return {"status": "ok_placeholder"}
     def _delete_notes_from_clip(self, track_index, clip_index, from_time, to_time, from_pitch, to_pitch): self.log_message("_delete_notes_from_clip called"); return {"status": "ok_placeholder"}
     def _transpose_notes_in_clip(self, track_index, clip_index, semitones, from_time, to_time, from_pitch, to_pitch): self.log_message("_transpose_notes_in_clip called"); return {"status": "ok_placeholder"}
@@ -408,4 +451,17 @@ class AbletonMCP(ControlSurface):
     def _get_notes_from_clip(self, track_index, clip_index): self.log_message("_get_notes_from_clip called"); return {"status": "placeholder_no_data"}
     def get_browser_tree(self, category_type="all"): self.log_message("get_browser_tree called"); return {"status": "placeholder_no_data"}
     def get_browser_items_at_path(self, path): self.log_message("get_browser_items_at_path called"); return {"status": "placeholder_no_data"}
-    def _get_scenes_info(self): self.log_message("_get_scenes_info called"); return {"status": "placeholder_no_data"}
+    def _get_scenes_info(self):
+        try:
+            scenes = []
+            for i, scene in enumerate(self._song.scenes):
+                scenes.append({
+                    "index": i,
+                    "name": scene.name,
+                    "color": scene.color,
+                    "is_triggered": scene.is_triggered
+                })
+            return {"scenes": scenes, "count": len(scenes)}
+        except Exception as e:
+            self.log_message(f"Error getting scenes info: {e}")
+            raise

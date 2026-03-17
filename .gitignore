@@ -42,3 +42,11 @@ Thumbs.db
 *.adv
 *.asd
 !AbletonMCP_Remote_Script/*
+
+# Documentation build output
+site/
+
+# Development config
+.mcp.json
+.serena/
+.gemini/

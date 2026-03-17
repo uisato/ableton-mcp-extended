@@ -186,7 +186,6 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
 # Create the MCP server with lifespan support
 mcp = FastMCP(
     "AbletonMCP",
-    description="Ableton Live integration through the Model Context Protocol",
     lifespan=server_lifespan
 )
 
@@ -498,6 +497,102 @@ def stop_playback(ctx: Context) -> str:
     except Exception as e:
         logger.error(f"Error stopping playback: {str(e)}")
         return f"Error stopping playback: {str(e)}"
+
+@mcp.tool()
+def get_scenes_info(ctx: Context) -> str:
+    """Get information about all scenes in the current Ableton session."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_scenes_info", {})
+
+        scenes = result.get("scenes", [])
+        if not scenes:
+            return "No scenes in the current session"
+
+        output = f"Total scenes: {len(scenes)}\n\n"
+
+        for scene in scenes:
+            output += f"Scene {scene['index']}: {scene['name']}"
+            if scene.get('is_triggered'):
+                output += " [Currently playing]"
+            output += f" (Color: {scene.get('color', 0)})\n"
+
+        return output
+    except Exception as e:
+        logger.error(f"Error getting scenes info: {str(e)}")
+        return f"Error getting scenes info: {str(e)}"
+
+@mcp.tool()
+def create_scene(ctx: Context, index: int = -1) -> str:
+    """
+    Create a new scene in Ableton Live.
+
+    Parameters:
+    - index: Position to insert the scene (-1 for end, default: -1)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("create_scene", {"index": index})
+        scene_index = result.get('index', index)
+        scene_name = result.get('name', 'Untitled')
+        return f"Created scene '{scene_name}' at index {scene_index}"
+    except Exception as e:
+        logger.error(f"Error creating scene: {str(e)}")
+        return f"Error creating scene: {str(e)}"
+
+@mcp.tool()
+def set_scene_name(ctx: Context, scene_index: int, name: str) -> str:
+    """
+    Set the name of a scene.
+
+    Parameters:
+    - scene_index: Index of the scene to rename
+    - name: New name for the scene
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_scene_name", {
+            "index": scene_index,
+            "name": name
+        })
+        return f"Renamed scene {scene_index} to '{name}'"
+    except Exception as e:
+        logger.error(f"Error setting scene name: {str(e)}")
+        return f"Error setting scene name: {str(e)}"
+
+@mcp.tool()
+def delete_scene(ctx: Context, scene_index: int) -> str:
+    """
+    Delete a scene from the Ableton session.
+
+    Parameters:
+    - scene_index: Index of the scene to delete
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("delete_scene", {"index": scene_index})
+        scene_name = result.get('name', 'Unknown')
+        return f"Deleted scene {scene_index} ('{scene_name}')"
+    except Exception as e:
+        logger.error(f"Error deleting scene: {str(e)}")
+        return f"Error deleting scene: {str(e)}"
+
+@mcp.tool()
+def fire_scene(ctx: Context, scene_index: int) -> str:
+    """
+    Fire (trigger) a scene in Ableton Live.
+
+    Parameters:
+    - scene_index: Index of the scene to fire
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("fire_scene", {"index": scene_index})
+        scene_name = result.get('name', 'Unknown')
+        return f"Fired scene {scene_index} ('{scene_name}')"
+    except Exception as e:
+        logger.error(f"Error firing scene: {str(e)}")
+        return f"Error firing scene: {str(e)}"
 
 @mcp.tool()
 def get_browser_tree(ctx: Context, category_type: str = "all") -> str:
