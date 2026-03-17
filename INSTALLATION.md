@@ -28,7 +28,7 @@ First, clone the repository and install the required Python package.
 
 1.  **Clone the Repository:**
     ```bash
-    git clone [https://github.com/uisato/ableton-mcp-extended.git](https://github.com/uisato/ableton-mcp-extended.git)
+    git clone https://github.com/uisato/ableton-mcp-extended.git
     cd ableton-mcp-extended
     ```
 
