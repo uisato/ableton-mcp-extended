@@ -225,11 +225,17 @@ class AbletonMCP(ControlSurface):
             elif command_type == "get_track_info":
                 track_index = params.get("track_index", 0)
                 response["result"] = self._get_track_info(track_index)
+            elif command_type == "get_device_parameters":
+                track_index = params.get("track_index", 0)
+                device_index = params.get("device_index", 0)
+                response["result"] = self._get_device_parameters(track_index, device_index)
             # Commands that modify Live's state should be scheduled on the main thread
             elif command_type in ["create_midi_track", "set_track_name", 
                                  "create_clip", "add_notes_to_clip", "set_clip_name", 
                                  "set_tempo", "fire_clip", "stop_clip",
-                                 "start_playback", "stop_playback", "load_browser_item"]:
+                                 "start_playback", "stop_playback", "load_browser_item",
+                                 "load_plugin", "load_instrument_by_name", "delete_track", "clear_clip", "delete_clip",
+                                 "remove_notes_from_clip", "set_device_parameter"]:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
@@ -282,6 +288,38 @@ class AbletonMCP(ControlSurface):
                             track_index = params.get("track_index", 0)
                             item_uri = params.get("item_uri", "")
                             result = self._load_browser_item(track_index, item_uri)
+                        elif command_type == "load_plugin":
+                            track_index = params.get("track_index", 0)
+                            plugin_name = params.get("plugin_name", "")
+                            plugin_type = params.get("plugin_type", None)
+                            result = self._load_plugin(track_index, plugin_name, plugin_type)
+                        elif command_type == "load_instrument_by_name":
+                            track_index = params.get("track_index", 0)
+                            instrument_name = params.get("instrument_name", "")
+                            category = params.get("category", "instruments")
+                            result = self._load_instrument_by_name(track_index, instrument_name, category)
+                        elif command_type == "delete_track":
+                            track_index = params.get("track_index", 0)
+                            result = self._delete_track(track_index)
+                        elif command_type == "clear_clip":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            result = self._clear_clip(track_index, clip_index)
+                        elif command_type == "delete_clip":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            result = self._delete_clip(track_index, clip_index)
+                        elif command_type == "remove_notes_from_clip":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            notes_to_remove = params.get("notes_to_remove", [])
+                            result = self._remove_notes_from_clip(track_index, clip_index, notes_to_remove)
+                        elif command_type == "set_device_parameter":
+                            track_index = params.get("track_index", 0)
+                            device_index = params.get("device_index", 0)
+                            parameter_index = params.get("parameter_index", 0)
+                            value = params.get("value", 0.0)
+                            result = self._set_device_parameter(track_index, device_index, parameter_index, value)
                         
                         # Put the result in the queue
                         response_queue.put({"status": "success", "result": result})
@@ -761,8 +799,13 @@ class AbletonMCP(ControlSurface):
     def _find_browser_item_by_uri(self, browser_or_item, uri, max_depth=10, current_depth=0):
         """Find a browser item by its URI"""
         try:
+            # Log the search for debugging
+            if current_depth == 0:
+                self.log_message("Searching for URI: {0}".format(uri))
+            
             # Check if this is the item we're looking for
             if hasattr(browser_or_item, 'uri') and browser_or_item.uri == uri:
+                self.log_message("Found matching URI: {0}".format(uri))
                 return browser_or_item
             
             # Stop recursion if we've reached max depth
@@ -777,10 +820,26 @@ class AbletonMCP(ControlSurface):
                     browser_or_item.sounds,
                     browser_or_item.drums,
                     browser_or_item.audio_effects,
-                    browser_or_item.midi_effects
+                    browser_or_item.midi_effects,
+                    browser_or_item.clips if hasattr(browser_or_item, 'clips') else None,
+                    browser_or_item.current_project if hasattr(browser_or_item, 'current_project') else None,
+                    browser_or_item.max_for_live if hasattr(browser_or_item, 'max_for_live') else None,
+                    browser_or_item.packs if hasattr(browser_or_item, 'packs') else None,
+                    browser_or_item.plugins if hasattr(browser_or_item, 'plugins') else None,
+                    browser_or_item.samples if hasattr(browser_or_item, 'samples') else None,
+                    browser_or_item.user_library if hasattr(browser_or_item, 'user_library') else None,
                 ]
+                categories = [c for c in categories if c is not None]
+                
+                # Log available categories for debugging
+                if current_depth == 0:
+                    browser_attrs = [attr for attr in dir(browser_or_item) if not attr.startswith('_') and hasattr(getattr(browser_or_item, attr, None), 'name')]
+                    self.log_message("Browser attributes with name: {0}".format(browser_attrs))
+                    self.log_message("Available categories: {0}".format([c.name if hasattr(c, 'name') else str(c) for c in categories]))
                 
                 for category in categories:
+                    if current_depth == 0:
+                        self.log_message("Searching in category: {0}".format(category.name if hasattr(category, 'name') else str(category)))
                     item = self._find_browser_item_by_uri(category, uri, max_depth, current_depth + 1)
                     if item:
                         return item
@@ -1058,5 +1117,935 @@ class AbletonMCP(ControlSurface):
             
         except Exception as e:
             self.log_message("Error getting browser items at path: {0}".format(str(e)))
+            self.log_message(traceback.format_exc())
+            raise
+    
+    def _load_plugin(self, track_index, plugin_name, plugin_type=None):
+        """
+        Load a plugin by name using intelligent search strategies.
+        
+        Args:
+            track_index: The index of the track to load on
+            plugin_name: Name of the plugin (e.g., 'analog lab v', 'serum', 'massive')
+            plugin_type: Optional plugin type filter ('vst3', 'vst', 'au', 'native')
+        """
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            
+            track = self._song.tracks[track_index]
+            
+            # Access the application's browser instance
+            app = self.application()
+            if not app or not hasattr(app, 'browser') or app.browser is None:
+                raise RuntimeError("Browser is not available in the Live application")
+            
+            # Normalize the plugin name
+            plugin_name = self._normalize_plugin_name(plugin_name)
+            
+            # Try multiple loading strategies
+            result = None
+            strategies = [
+                ("fuzzy_search", self._load_plugin_fuzzy_search),
+                ("vendor_search", self._load_plugin_vendor_search),
+                ("name_search", self._load_plugin_name_search),
+                ("exact_path", self._load_plugin_exact_path)
+            ]
+            
+            for strategy_name, strategy_func in strategies:
+                try:
+                    self.log_message("Trying {0} strategy for plugin: {1}".format(strategy_name, plugin_name))
+                    result = strategy_func(app, track, plugin_name, plugin_type)
+                    if result and result.get("loaded", False):
+                        self.log_message("Successfully loaded plugin using {0} strategy".format(strategy_name))
+                        return result
+                except Exception as e:
+                    self.log_message("Strategy {0} failed: {1}".format(strategy_name, str(e)))
+                    continue
+            
+            # If all strategies failed, provide helpful error message
+            available_plugins = self._get_available_plugins_summary(app, plugin_type)
+            raise ValueError("Could not load plugin '{0}'. Available plugins: {1}".format(plugin_name, available_plugins))
+            
+        except Exception as e:
+            self.log_message("Error loading plugin by path: {0}".format(str(e)))
+            self.log_message(traceback.format_exc())
+            raise
+    
+    def _normalize_plugin_name(self, plugin_name):
+        """Normalize plugin name to handle various input formats"""
+        # Remove common prefixes if they exist
+        prefixes_to_remove = ["plugins/", "vst3/", "vst/", "au/"]
+        normalized = plugin_name.lower().strip()
+        
+        for prefix in prefixes_to_remove:
+            if normalized.startswith(prefix):
+                normalized = normalized[len(prefix):]
+        
+        # Handle common variations
+        replacements = {
+            "analog lab v": "analog lab v",
+            "analog lab": "analog lab v",
+            "arturia analog": "analog lab v",
+            "serum": "serum",
+            "massive": "massive",
+            "sylenth": "sylenth1",
+            "sylenth1": "sylenth1"
+        }
+        
+        for old, new in replacements.items():
+            if normalized.endswith(old):
+                normalized = normalized.replace(old, new)
+                break
+        
+        return normalized
+    
+    def _load_plugin_exact_path(self, app, track, plugin_name, plugin_type=None):
+        """Load plugin using exact path navigation"""
+        path_parts = [p.strip() for p in plugin_name.split("/") if p.strip()]
+        
+        if len(path_parts) < 2:  # Need at least vendor/plugin
+            raise ValueError("Plugin path must have at least vendor/plugin format")
+        
+        # Navigate to plugins
+        current_item = app.browser.plugins if hasattr(app.browser, 'plugins') else None
+        if not current_item:
+            raise RuntimeError("Plugins category not available in browser")
+        
+        # Navigate through the path
+        for i, part in enumerate(path_parts):
+            if not hasattr(current_item, 'children'):
+                raise RuntimeError("Item at '{0}' has no children".format('/'.join(path_parts[:i+1])))
+            
+            found = False
+            for child in current_item.children:
+                if hasattr(child, 'name') and child.name.lower() == part.lower():
+                    current_item = child
+                    found = True
+                    break
+            
+            if not found:
+                raise ValueError("Path part '{0}' not found in '{1}'".format(part, '/'.join(path_parts[:i+1])))
+        
+        # Check if the final item is loadable
+        if not hasattr(current_item, 'is_loadable') or not current_item.is_loadable:
+            raise ValueError("Item '{0}' is not loadable".format(plugin_name))
+        
+        # Select the track and load
+        self._song.view.selected_track = track
+        app.browser.load_item(current_item)
+        
+        return {
+            "loaded": True,
+            "plugin_name": current_item.name if hasattr(current_item, 'name') else "Unknown",
+            "track_name": track.name,
+            "plugin_path": plugin_name,
+            "strategy": "exact_path"
+        }
+    
+    def _load_plugin_fuzzy_search(self, app, track, plugin_name, plugin_type=None):
+        """Load plugin using fuzzy search through all plugins"""
+        target_name = plugin_name.split("/")[-1].lower()  # Get just the plugin name
+        
+        # Search through all plugins
+        all_plugins = self._get_all_plugins(app, plugin_type)
+        
+        best_match = None
+        best_score = 0
+        
+        for plugin in all_plugins:
+            plugin_name_lower = plugin.get('name', '').lower()
+            score = self._calculate_similarity(target_name, plugin_name_lower)
+            
+            if score > best_score and score > 0.7:  # 70% similarity threshold
+                best_score = score
+                best_match = plugin
+        
+        if best_match:
+            # Navigate to the best match
+            current_item = app.browser.plugins
+            path_parts = best_match.get('path', '').split('/')
+            
+            for part in path_parts:
+                if not part or not hasattr(current_item, 'children'):
+                    continue
+                
+                for child in current_item.children:
+                    if hasattr(child, 'name') and child.name.lower() == part.lower():
+                        current_item = child
+                        break
+            
+            if hasattr(current_item, 'is_loadable') and current_item.is_loadable:
+                self._song.view.selected_track = track
+                app.browser.load_item(current_item)
+                
+                return {
+                    "loaded": True,
+                    "plugin_name": current_item.name if hasattr(current_item, 'name') else "Unknown",
+                    "track_name": track.name,
+                    "plugin_path": plugin_name,
+                    "strategy": "fuzzy_search",
+                    "match_score": best_score
+                }
+        
+        raise ValueError("No fuzzy match found for '{0}'".format(target_name))
+    
+    def _load_plugin_vendor_search(self, app, track, plugin_name, plugin_type=None):
+        """Load plugin by searching within specific vendor folders"""
+        path_parts = plugin_name.split("/")
+        if len(path_parts) < 2:
+            raise ValueError("Need vendor/plugin format")
+        
+        vendor_name = path_parts[0].lower()
+        target_plugin_name = path_parts[-1].lower()
+        
+        # Find vendor folder
+        current_item = app.browser.plugins
+        vendor_folder = None
+        
+        for child in current_item.children:
+            if hasattr(child, 'name') and child.name.lower() == vendor_name:
+                vendor_folder = child
+                break
+        
+        if not vendor_folder:
+            raise ValueError("Vendor '{0}' not found".format(vendor_name))
+        
+        # Search within vendor folder
+        if hasattr(vendor_folder, 'children'):
+            for plugin in vendor_folder.children:
+                if hasattr(plugin, 'name') and plugin.name.lower() == target_plugin_name:
+                    if hasattr(plugin, 'is_loadable') and plugin.is_loadable:
+                        self._song.view.selected_track = track
+                        app.browser.load_item(plugin)
+                        
+                        return {
+                            "loaded": True,
+                            "plugin_name": plugin.name,
+                            "track_name": track.name,
+                            "plugin_path": plugin_name,
+                            "strategy": "vendor_search"
+                        }
+        
+        raise ValueError("Plugin '{0}' not found in vendor '{1}'".format(target_plugin_name, vendor_name))
+    
+    def _load_plugin_name_search(self, app, track, plugin_name, plugin_type=None):
+        """Load plugin by searching for name across all vendors"""
+        target_name = plugin_name.split("/")[-1].lower()
+        
+        # Search through all plugins
+        current_item = app.browser.plugins
+        
+        def search_recursive(item, depth=0):
+            if depth > 5:  # Prevent infinite recursion
+                return None
+            
+            if hasattr(item, 'children'):
+                for child in item.children:
+                    if hasattr(child, 'name') and child.name.lower() == target_name:
+                        if hasattr(child, 'is_loadable') and child.is_loadable:
+                            return child
+                    
+                    # Recursive search
+                    result = search_recursive(child, depth + 1)
+                    if result:
+                        return result
+            
+            return None
+        
+        found_plugin = search_recursive(current_item)
+        
+        if found_plugin:
+            self._song.view.selected_track = track
+            app.browser.load_item(found_plugin)
+            
+            return {
+                "loaded": True,
+                "plugin_name": found_plugin.name,
+                "track_name": track.name,
+                "plugin_path": plugin_name,
+                "strategy": "name_search"
+            }
+        
+        raise ValueError("Plugin '{0}' not found in any vendor folder".format(target_name))
+    
+    def _get_all_plugins(self, app, plugin_type=None):
+        """Get a list of all available plugins with their paths, optionally filtered by type"""
+        plugins = []
+        current_item = app.browser.plugins
+        
+        def collect_plugins(item, path="", depth=0):
+            if hasattr(item, 'children'):
+                for child in item.children:
+                    child_path = path + "/" + child.name if path else child.name
+                    
+                    if hasattr(child, 'is_loadable') and child.is_loadable:
+                        # Apply plugin type filter if specified
+                        if plugin_type:
+                            # Simple type detection based on path
+                            child_path_lower = child_path.lower()
+                            if plugin_type.lower() == "vst3" and "vst3" in child_path_lower:
+                                plugins.append({
+                                    'name': child.name,
+                                    'path': child_path,
+                                    'full_path': child_path,
+                                    'type': 'vst3'
+                                })
+                            elif plugin_type.lower() == "vst" and "vst" in child_path_lower and "vst3" not in child_path_lower:
+                                plugins.append({
+                                    'name': child.name,
+                                    'path': child_path,
+                                    'full_path': child_path,
+                                    'type': 'vst'
+                                })
+                            elif plugin_type.lower() == "au" and "au" in child_path_lower:
+                                plugins.append({
+                                    'name': child.name,
+                                    'path': child_path,
+                                    'full_path': child_path,
+                                    'type': 'au'
+                                })
+                            elif plugin_type.lower() == "native" and ("vst" not in child_path_lower and "au" not in child_path_lower):
+                                plugins.append({
+                                    'name': child.name,
+                                    'path': child_path,
+                                    'full_path': child_path,
+                                    'type': 'native'
+                                })
+                        else:
+                            # No filter, include all plugins
+                            plugins.append({
+                                'name': child.name,
+                                'path': child_path,
+                                'full_path': child_path,
+                                'type': 'unknown'
+                            })
+                    elif depth < 3:  # Limit recursion depth
+                        collect_plugins(child, child_path, depth + 1)
+        
+        collect_plugins(current_item)
+        return plugins
+    
+    def _calculate_similarity(self, str1, str2):
+        """Calculate similarity between two strings (simple implementation)"""
+        # Simple similarity calculation
+        str1_words = set(str1.split())
+        str2_words = set(str2.split())
+        
+        if not str1_words or not str2_words:
+            return 0.0
+        
+        intersection = str1_words.intersection(str2_words)
+        union = str1_words.union(str2_words)
+        
+        return len(intersection) / len(union) if union else 0.0
+    
+    def _get_available_plugins_summary(self, app, plugin_type=None):
+        """Get a summary of available plugins for error messages"""
+        try:
+            plugins = self._get_all_plugins(app, plugin_type)
+            if len(plugins) > 10:
+                type_info = f" (filtered by {plugin_type})" if plugin_type else ""
+                return "Found {0} plugins{1} (showing first 10): {2}".format(
+                    len(plugins),
+                    type_info,
+                    ", ".join([p['name'] for p in plugins[:10]])
+                )
+            else:
+                type_info = f" (filtered by {plugin_type})" if plugin_type else ""
+                return "Available plugins{0}: {1}".format(
+                    type_info,
+                    ", ".join([p['name'] for p in plugins])
+                )
+        except:
+            return "Unable to list available plugins"
+    
+    def _load_instrument_by_name(self, track_index, instrument_name, category):
+        """
+        Load an instrument or effect by name using intelligent search strategies.
+        
+        Args:
+            track_index: The index of the track to load on
+            instrument_name: Name of the instrument or effect (e.g., 'wavetable', 'analog', 'reverb')
+            category: The category to search in ('instruments', 'audio_effects', 'midi_effects', 'drums')
+        """
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            
+            track = self._song.tracks[track_index]
+            
+            # Access the application's browser instance
+            app = self.application()
+            if not app or not hasattr(app, 'browser') or app.browser is None:
+                raise RuntimeError("Browser is not available in the Live application")
+            
+            # Normalize the instrument name
+            instrument_name = self._normalize_instrument_name(instrument_name)
+            
+            # Try multiple loading strategies
+            result = None
+            strategies = [
+                ("exact_search", self._load_instrument_exact_search),
+                ("fuzzy_search", self._load_instrument_fuzzy_search),
+                ("category_search", self._load_instrument_category_search)
+            ]
+            
+            for strategy_name, strategy_func in strategies:
+                try:
+                    self.log_message("Trying {0} strategy for {1}: {2}".format(strategy_name, category, instrument_name))
+                    result = strategy_func(app, track, instrument_name, category)
+                    if result and result.get("loaded", False):
+                        self.log_message("Successfully loaded {0} using {1} strategy".format(category, strategy_name))
+                        return result
+                except Exception as e:
+                    self.log_message("Strategy {0} failed: {1}".format(strategy_name, str(e)))
+                    continue
+            
+            # If all strategies failed, provide helpful error message
+            available_items = self._get_available_items_summary(app, category)
+            raise ValueError("Could not load {0} '{1}'. Available {2}: {3}".format(category, instrument_name, category, available_items))
+            
+        except Exception as e:
+            self.log_message("Error loading {0} by name: {1}".format(category, str(e)))
+            self.log_message(traceback.format_exc())
+            raise
+    
+    def _normalize_instrument_name(self, instrument_name):
+        """Normalize instrument name to handle various input formats"""
+        # Remove common prefixes if they exist
+        prefixes_to_remove = ["ableton ", "live ", "native "]
+        normalized = instrument_name.lower().strip()
+        
+        for prefix in prefixes_to_remove:
+            if normalized.startswith(prefix):
+                normalized = normalized[len(prefix):]
+        
+        # Handle common variations
+        replacements = {
+            "wavetable": "wavetable",
+            "analog": "analog",
+            "operator": "operator",
+            "collision": "collision",
+            "tension": "tension",
+            "electric": "electric",
+            "reverb": "reverb",
+            "delay": "delay",
+            "compressor": "compressor",
+            "eq": "eq eight",
+            "equalizer": "eq eight",
+            "filter": "auto filter",
+            "autofilter": "auto filter"
+        }
+        
+        for old, new in replacements.items():
+            if normalized == old:
+                normalized = new
+                break
+        
+        return normalized
+    
+    def _load_instrument_exact_search(self, app, track, instrument_name, category):
+        """Load instrument using exact name search"""
+        # Get the appropriate category from browser
+        category_map = {
+            "instruments": app.browser.instruments,
+            "audio_effects": app.browser.audio_effects,
+            "midi_effects": app.browser.midi_effects,
+            "drums": app.browser.drums
+        }
+        
+        if category not in category_map:
+            raise ValueError("Unknown category: {0}".format(category))
+        
+        current_item = category_map[category]
+        
+        # Search for exact match
+        def search_recursive(item, depth=0):
+            if depth > 5:  # Prevent infinite recursion
+                return None
+            
+            if hasattr(item, 'children'):
+                for child in item.children:
+                    if hasattr(child, 'name') and child.name.lower() == instrument_name.lower():
+                        if hasattr(child, 'is_loadable') and child.is_loadable:
+                            return child
+                    
+                    # Recursive search
+                    result = search_recursive(child, depth + 1)
+                    if result:
+                        return result
+            
+            return None
+        
+        found_item = search_recursive(current_item)
+        
+        if found_item:
+            self._song.view.selected_track = track
+            app.browser.load_item(found_item)
+            
+            return {
+                "loaded": True,
+                "item_name": found_item.name,
+                "track_name": track.name,
+                "instrument_name": instrument_name,
+                "category": category,
+                "strategy": "exact_search"
+            }
+        
+        raise ValueError("Exact match not found for '{0}' in {1}".format(instrument_name, category))
+    
+    def _load_instrument_fuzzy_search(self, app, track, instrument_name, category):
+        """Load instrument using fuzzy search"""
+        # Get the appropriate category from browser
+        category_map = {
+            "instruments": app.browser.instruments,
+            "audio_effects": app.browser.audio_effects,
+            "midi_effects": app.browser.midi_effects,
+            "drums": app.browser.drums
+        }
+        
+        if category not in category_map:
+            raise ValueError("Unknown category: {0}".format(category))
+        
+        current_item = category_map[category]
+        
+        # Get all items in the category
+        all_items = self._get_all_items_in_category(app, category)
+        
+        best_match = None
+        best_score = 0
+        
+        for item in all_items:
+            item_name = item.get('name', '').lower()
+            score = self._calculate_similarity(instrument_name, item_name)
+            
+            if score > best_score and score > 0.7:  # 70% similarity threshold
+                best_score = score
+                best_match = item
+        
+        if best_match:
+            # Navigate to the best match
+            item_path = best_match.get('path', '').split('/')
+            
+            for part in item_path:
+                if not part or not hasattr(current_item, 'children'):
+                    continue
+                
+                for child in current_item.children:
+                    if hasattr(child, 'name') and child.name.lower() == part.lower():
+                        current_item = child
+                        break
+            
+            if hasattr(current_item, 'is_loadable') and current_item.is_loadable:
+                self._song.view.selected_track = track
+                app.browser.load_item(current_item)
+                
+                return {
+                    "loaded": True,
+                    "item_name": current_item.name if hasattr(current_item, 'name') else "Unknown",
+                    "track_name": track.name,
+                    "instrument_name": instrument_name,
+                    "category": category,
+                    "strategy": "fuzzy_search",
+                    "match_score": best_score
+                }
+        
+        raise ValueError("No fuzzy match found for '{0}' in {1}".format(instrument_name, category))
+    
+    def _load_instrument_category_search(self, app, track, instrument_name, category):
+        """Load instrument by searching within the specified category"""
+        # Get the appropriate category from browser
+        category_map = {
+            "instruments": app.browser.instruments,
+            "audio_effects": app.browser.audio_effects,
+            "midi_effects": app.browser.midi_effects,
+            "drums": app.browser.drums
+        }
+        
+        if category not in category_map:
+            raise ValueError("Unknown category: {0}".format(category))
+        
+        current_item = category_map[category]
+        
+        # Search for the item in the category
+        def search_recursive(item, depth=0):
+            if depth > 5:  # Prevent infinite recursion
+                return None
+            
+            if hasattr(item, 'children'):
+                for child in item.children:
+                    if hasattr(child, 'name') and child.name.lower() == instrument_name.lower():
+                        if hasattr(child, 'is_loadable') and child.is_loadable:
+                            return child
+                    
+                    # Recursive search
+                    result = search_recursive(child, depth + 1)
+                    if result:
+                        return result
+            
+            return None
+        
+        found_item = search_recursive(current_item)
+        
+        if found_item:
+            self._song.view.selected_track = track
+            app.browser.load_item(found_item)
+            
+            return {
+                "loaded": True,
+                "item_name": found_item.name,
+                "track_name": track.name,
+                "instrument_name": instrument_name,
+                "category": category,
+                "strategy": "category_search"
+            }
+        
+        raise ValueError("Item '{0}' not found in {1}".format(instrument_name, category))
+    
+    def _get_all_items_in_category(self, app, category):
+        """Get a list of all available items in a category"""
+        items = []
+        
+        category_map = {
+            "instruments": app.browser.instruments,
+            "audio_effects": app.browser.audio_effects,
+            "midi_effects": app.browser.midi_effects,
+            "drums": app.browser.drums
+        }
+        
+        if category not in category_map:
+            return items
+        
+        current_item = category_map[category]
+        
+        def collect_items(item, path=""):
+            if hasattr(item, 'children'):
+                for child in item.children:
+                    child_path = path + "/" + child.name if path else child.name
+                    
+                    if hasattr(child, 'is_loadable') and child.is_loadable:
+                        items.append({
+                            'name': child.name,
+                            'path': child_path,
+                            'full_path': child_path
+                        })
+                    else:
+                        collect_items(child, child_path)
+        
+        collect_items(current_item)
+        return items
+    
+    def _get_available_items_summary(self, app, category):
+        """Get a summary of available items in a category for error messages"""
+        try:
+            items = self._get_all_items_in_category(app, category)
+            if len(items) > 10:
+                return "Found {0} {1} (showing first 10): {2}".format(
+                    len(items),
+                    category,
+                    ", ".join([i['name'] for i in items[:10]])
+                )
+            else:
+                return "Available {0}: {1}".format(
+                    category,
+                    ", ".join([i['name'] for i in items])
+                )
+        except:
+            return "Unable to list available {0}".format(category)
+    
+    def _delete_track(self, track_index):
+        """
+        Delete a track by its index.
+        
+        Args:
+            track_index: The index of the track to delete
+            
+        Returns:
+            str: Success message or error description
+        """
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index {0} out of range (0-{1})".format(track_index, len(self._song.tracks) - 1))
+            
+            track = self._song.tracks[track_index]
+            track_name = track.name
+            
+            # Delete the track
+            self._song.delete_track(track_index)
+            
+            self.log_message("Successfully deleted track {0} ('{1}')".format(track_index, track_name))
+            return "Successfully deleted track {0} ('{1}')".format(track_index, track_name)
+            
+        except Exception as e:
+            self.log_message("Error deleting track: {0}".format(str(e)))
+            self.log_message(traceback.format_exc())
+            raise
+    
+    def _clear_clip(self, track_index, clip_index):
+        """
+        Clear all notes from a clip without deleting the clip itself.
+        
+        Args:
+            track_index: The index of the track containing the clip
+            clip_index: The index of the clip slot
+            
+        Returns:
+            str: Success message or error description
+        """
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index {0} out of range (0-{1})".format(track_index, len(self._song.tracks) - 1))
+            
+            track = self._song.tracks[track_index]
+            
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Clip index {0} out of range (0-{1})".format(clip_index, len(track.clip_slots) - 1))
+            
+            clip_slot = track.clip_slots[clip_index]
+            
+            if not clip_slot.has_clip:
+                return "No clip found at track {0}, slot {1}".format(track_index, clip_index)
+            
+            clip = clip_slot.clip
+            clip_name = clip.name
+            
+            # Clear all notes from the clip
+            clip.select_all_notes()
+            clip.replace_selected_notes(())
+            
+            self.log_message("Successfully cleared all notes from clip '{0}' at track {1}, slot {2}".format(clip_name, track_index, clip_index))
+            return "Successfully cleared all notes from clip '{0}' at track {1}, slot {2}".format(clip_name, track_index, clip_index)
+            
+        except Exception as e:
+            self.log_message("Error clearing clip: {0}".format(str(e)))
+            self.log_message(traceback.format_exc())
+            raise
+    
+    def _delete_clip(self, track_index, clip_index):
+        """
+        Delete a clip entirely from a clip slot.
+        
+        Args:
+            track_index: The index of the track containing the clip
+            clip_index: The index of the clip slot
+            
+        Returns:
+            str: Success message or error description
+        """
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index {0} out of range (0-{1})".format(track_index, len(self._song.tracks) - 1))
+            
+            track = self._song.tracks[track_index]
+            
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Clip index {0} out of range (0-{1})".format(clip_index, len(track.clip_slots) - 1))
+            
+            clip_slot = track.clip_slots[clip_index]
+            
+            if not clip_slot.has_clip:
+                return "No clip found at track {0}, slot {1} to delete".format(track_index, clip_index)
+            
+            clip_name = clip_slot.clip.name
+            
+            # Delete the clip
+            clip_slot.delete_clip()
+            
+            self.log_message("Successfully deleted clip '{0}' from track {1}, slot {2}".format(clip_name, track_index, clip_index))
+            return "Successfully deleted clip '{0}' from track {1}, slot {2}".format(clip_name, track_index, clip_index)
+            
+        except Exception as e:
+            self.log_message("Error deleting clip: {0}".format(str(e)))
+            self.log_message(traceback.format_exc())
+            raise
+    
+    def _remove_notes_from_clip(self, track_index, clip_index, notes_to_remove):
+        """
+        Remove specific notes from a clip based on criteria.
+        
+        Args:
+            track_index: The index of the track containing the clip
+            clip_index: The index of the clip slot
+            notes_to_remove: List of note criteria to remove, each can contain:
+                           - pitch: MIDI note number to match
+                           - start_time: Start time to match (optional)
+                           - duration: Duration to match (optional)
+                           - velocity: Velocity to match (optional)
+                           
+        Returns:
+            str: Success message with number of notes removed
+        """
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index {0} out of range (0-{1})".format(track_index, len(self._song.tracks) - 1))
+            
+            track = self._song.tracks[track_index]
+            
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Clip index {0} out of range (0-{1})".format(clip_index, len(track.clip_slots) - 1))
+            
+            clip_slot = track.clip_slots[clip_index]
+            
+            if not clip_slot.has_clip:
+                return "No clip found at track {0}, slot {1}".format(track_index, clip_index)
+            
+            clip = clip_slot.clip
+            clip_name = clip.name
+            
+            if not hasattr(clip, 'get_notes'):
+                return "Clip at track {0}, slot {1} is not a MIDI clip".format(track_index, clip_index)
+            
+            # Get all notes from the clip
+            all_notes = clip.get_notes(0, 0, clip.length, 127)
+            notes_to_keep = []
+            removed_count = 0
+            
+            # Filter notes based on removal criteria
+            for note in all_notes:
+                should_remove = False
+                
+                for remove_criteria in notes_to_remove:
+                    match = True
+                    
+                    # Check each criteria field
+                    if "pitch" in remove_criteria and note.pitch != remove_criteria["pitch"]:
+                        match = False
+                    if "start_time" in remove_criteria and abs(note.start_time - remove_criteria["start_time"]) > 0.001:
+                        match = False
+                    if "duration" in remove_criteria and abs(note.duration - remove_criteria["duration"]) > 0.001:
+                        match = False
+                    if "velocity" in remove_criteria and note.velocity != remove_criteria["velocity"]:
+                        match = False
+                    
+                    if match:
+                        should_remove = True
+                        break
+                
+                if should_remove:
+                    removed_count += 1
+                else:
+                    notes_to_keep.append(note)
+            
+            # Replace all notes with the filtered list
+            clip.select_all_notes()
+            clip.replace_selected_notes(tuple(notes_to_keep))
+            
+            self.log_message("Successfully removed {0} notes from clip '{1}' at track {2}, slot {3}".format(removed_count, clip_name, track_index, clip_index))
+            return "Successfully removed {0} notes from clip '{1}' at track {2}, slot {3}".format(removed_count, clip_name, track_index, clip_index)
+            
+        except Exception as e:
+            self.log_message("Error removing notes from clip: {0}".format(str(e)))
+            self.log_message(traceback.format_exc())
+            raise
+    
+    def _get_device_parameters(self, track_index, device_index):
+        """
+        Get detailed information about a device's parameters.
+        
+        Args:
+            track_index: The index of the track containing the device
+            device_index: The index of the device on the track
+            
+        Returns:
+            dict: Device parameter information
+        """
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index {0} out of range (0-{1})".format(track_index, len(self._song.tracks) - 1))
+            
+            track = self._song.tracks[track_index]
+            
+            if device_index < 0 or device_index >= len(track.devices):
+                raise IndexError("Device index {0} out of range (0-{1})".format(device_index, len(track.devices) - 1))
+            
+            device = track.devices[device_index]
+            
+            # Get device info
+            device_info = {
+                "name": device.name,
+                "class_name": device.class_name,
+                "can_have_chains": device.can_have_chains,
+                "can_have_drum_pads": device.can_have_drum_pads,
+                "parameters": []
+            }
+            
+            # Get all parameters
+            for i, param in enumerate(device.parameters):
+                param_info = {
+                    "index": i,
+                    "name": param.name,
+                    "display_name": param.original_name,
+                    "value": param.value,
+                    "min": param.min,
+                    "max": param.max,
+                    "is_enabled": param.is_enabled,
+                    "is_quantized": param.is_quantized,
+                    "value_items": []
+                }
+                
+                # Get quantized value items if available
+                if param.is_quantized and hasattr(param, 'value_items'):
+                    param_info["value_items"] = list(param.value_items)
+                
+                # Add string representation of current value
+                try:
+                    param_info["str_value"] = str(param)
+                except:
+                    param_info["str_value"] = "N/A"
+                
+                device_info["parameters"].append(param_info)
+            
+            self.log_message("Successfully retrieved {0} parameters for device '{1}' on track {2}".format(len(device_info["parameters"]), device.name, track_index))
+            return device_info
+            
+        except Exception as e:
+            self.log_message("Error getting device parameters: {0}".format(str(e)))
+            self.log_message(traceback.format_exc())
+            raise
+    
+    def _set_device_parameter(self, track_index, device_index, parameter_index, value):
+        """
+        Set a device parameter value.
+        
+        Args:
+            track_index: The index of the track containing the device
+            device_index: The index of the device on the track
+            parameter_index: The index of the parameter to modify
+            value: The new value (0.0 - 1.0 for most parameters)
+            
+        Returns:
+            str: Success message with parameter info
+        """
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index {0} out of range (0-{1})".format(track_index, len(self._song.tracks) - 1))
+            
+            track = self._song.tracks[track_index]
+            
+            if device_index < 0 or device_index >= len(track.devices):
+                raise IndexError("Device index {0} out of range (0-{1})".format(device_index, len(track.devices) - 1))
+            
+            device = track.devices[device_index]
+            
+            if parameter_index < 0 or parameter_index >= len(device.parameters):
+                raise IndexError("Parameter index {0} out of range (0-{1})".format(parameter_index, len(device.parameters) - 1))
+            
+            param = device.parameters[parameter_index]
+            
+            if not param.is_enabled:
+                return "Parameter '{0}' is not enabled and cannot be modified".format(param.name)
+            
+            # Clamp value to parameter's valid range
+            clamped_value = max(param.min, min(param.max, value))
+            
+            old_value = param.value
+            param.value = clamped_value
+            
+            self.log_message("Successfully set parameter '{0}' on device '{1}' from {2} to {3}".format(param.name, device.name, old_value, clamped_value))
+            return "Successfully set parameter '{0}' on device '{1}' from {2} to {3}".format(param.name, device.name, old_value, clamped_value)
+            
+        except Exception as e:
+            self.log_message("Error setting device parameter: {0}".format(str(e)))
             self.log_message(traceback.format_exc())
             raise
