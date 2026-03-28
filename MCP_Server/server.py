@@ -105,7 +105,15 @@ class AbletonConnection:
             "create_midi_track", "create_audio_track", "set_track_name",
             "create_clip", "add_notes_to_clip", "set_clip_name",
             "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
-            "start_playback", "stop_playback", "load_instrument_or_effect"
+            "start_playback", "stop_playback", "load_instrument_or_effect",
+            "set_song_time", "set_arrangement_loop", "jump_to_cue",
+            "create_cue_point", "delete_cue_point",
+            "create_arrangement_clip", "create_arrangement_audio_clip",
+            "duplicate_to_arrangement", "delete_arrangement_clip",
+            "set_arrangement_clip_property",
+            "set_view", "control_arrangement_view",
+            "manage_clip_automation",
+            "add_notes_to_arrangement_clip",
         ]
         
         try:
@@ -189,6 +197,31 @@ mcp = FastMCP(
     description="Ableton Live integration through the Model Context Protocol",
     lifespan=server_lifespan
 )
+
+# Bar/beat conversion utilities
+
+def bar_to_beat(bar: int, numerator: int = 4, denominator: int = 4) -> float:
+    """Convert a 1-based bar number to a beat position.
+
+    Parameters:
+    - bar: 1-based bar number (bar 1 = beat 0)
+    - numerator: time signature numerator (e.g., 4 in 4/4)
+    - denominator: time signature denominator (e.g., 4 in 4/4)
+    """
+    return (bar - 1) * numerator * (4 / denominator)
+
+
+def beat_to_bar(beat: float, numerator: int = 4, denominator: int = 4) -> int:
+    """Convert a beat position to a 1-based bar number.
+
+    Parameters:
+    - beat: beat position (0-based)
+    - numerator: time signature numerator
+    - denominator: time signature denominator
+    """
+    beats_per_bar = numerator * (4 / denominator)
+    return int(beat / beats_per_bar) + 1
+
 
 # Global connection for resources
 _ableton_connection = None
@@ -651,6 +684,514 @@ def load_drum_kit(ctx: Context, track_index: int, rack_uri: str, kit_path: str) 
     except Exception as e:
         logger.error(f"Error loading drum kit: {str(e)}")
         return f"Error loading drum kit: {str(e)}"
+
+# --- Arrangement View Tools ---
+
+_ARRANGEMENT_TIP = "\nTip: use set_ableton_view(view='Arranger') to see changes in arrangement view."
+
+
+def _get_time_signature():
+    """Get current time signature from Ableton."""
+    ableton = get_ableton_connection()
+    info = ableton.send_command("get_session_info")
+    return info.get("signature_numerator", 4), info.get("signature_denominator", 4)
+
+
+def _convert_bar_to_beat(bar: int, beat: float = 0.0) -> float:
+    """Convert bar (1-based) to beat, fetching time signature from Ableton."""
+    if bar > 0:
+        num, denom = _get_time_signature()
+        return bar_to_beat(bar, num, denom)
+    return beat
+
+
+@mcp.tool()
+def get_arrangement_info(ctx: Context, track_index: int = 0) -> str:
+    """Get arrangement clips and transport state.
+
+    Parameters:
+    - track_index: Track number (1-based). 0 = all tracks.
+    """
+    try:
+        ableton = get_ableton_connection()
+        idx = track_index - 1 if track_index > 0 else -1
+        result = ableton.send_command("get_arrangement_info", {"track_index": idx})
+
+        num = result.get("transport", {}).get("signature_numerator", 4)
+        denom = result.get("transport", {}).get("signature_denominator", 4)
+        transport = result.get("transport", {})
+
+        lines = ["=== Arrangement Info ==="]
+        lines.append(f"Tempo: {transport.get('tempo')} BPM | "
+                     f"Time Sig: {num}/{denom} | "
+                     f"Playing: {transport.get('is_playing')} | "
+                     f"Position: bar {beat_to_bar(transport.get('current_time', 0), num, denom)}")
+        if transport.get("loop_enabled"):
+            ls = transport.get("loop_start", 0)
+            ll = transport.get("loop_length", 0)
+            lines.append(f"Loop: bars {beat_to_bar(ls, num, denom)}-"
+                         f"{beat_to_bar(ls + ll, num, denom)}")
+
+        for t in result.get("tracks", []):
+            clips = t.get("arrangement_clips", [])
+            lines.append(f"\nTrack {t['index'] + 1}: {t['name']} "
+                         f"({'MIDI' if t.get('is_midi') else 'Audio'}) — "
+                         f"{len(clips)} clip(s)")
+            for c in clips:
+                st = c.get("start_time", 0)
+                et = c.get("end_time", 0)
+                muted = " [MUTED]" if c.get("muted") else ""
+                lines.append(f"  {c.get('index', 0) + 1}. \"{c.get('name', '')}\" "
+                             f"bars {beat_to_bar(st, num, denom)}-"
+                             f"{beat_to_bar(et, num, denom)}{muted}")
+
+        return "\n".join(lines)
+    except Exception as e:
+        logger.error(f"Error getting arrangement info: {str(e)}")
+        return f"Error getting arrangement info: {str(e)}"
+
+
+@mcp.tool()
+def get_cue_points(ctx: Context) -> str:
+    """List all cue points (locators) with bar positions."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_cue_points")
+        num, denom = _get_time_signature()
+
+        cues = result.get("cue_points", [])
+        if not cues:
+            return "No cue points in this project."
+
+        lines = ["=== Cue Points ==="]
+        for cp in cues:
+            bar = beat_to_bar(cp.get("time", 0), num, denom)
+            lines.append(f"  \"{cp.get('name', '')}\" — bar {bar}")
+        return "\n".join(lines)
+    except Exception as e:
+        logger.error(f"Error getting cue points: {str(e)}")
+        return f"Error getting cue points: {str(e)}"
+
+
+@mcp.tool()
+def set_song_time(ctx: Context, bar: int = 0, beat: float = 0.0) -> str:
+    """Jump playback to a position.
+
+    Parameters:
+    - bar: Bar number (1-based). Takes precedence over beat.
+    - beat: Beat position (0-based).
+    """
+    try:
+        ableton = get_ableton_connection()
+        time_val = _convert_bar_to_beat(bar, beat)
+        result = ableton.send_command("set_song_time", {"time": time_val})
+        num, denom = _get_time_signature()
+        return f"Jumped to bar {beat_to_bar(time_val, num, denom)} (beat {time_val})"
+    except Exception as e:
+        logger.error(f"Error setting song time: {str(e)}")
+        return f"Error setting song time: {str(e)}"
+
+
+@mcp.tool()
+def set_arrangement_loop(
+    ctx: Context,
+    enabled: bool = True,
+    start_bar: int = 0,
+    end_bar: int = 0,
+    start_beat: float = 0.0,
+    length_beats: float = 0.0,
+) -> str:
+    """Enable/disable arrangement loop and set region.
+
+    Parameters:
+    - enabled: Whether loop is on.
+    - start_bar: Loop start (1-based). Takes precedence over start_beat.
+    - end_bar: Loop end (1-based). Used with start_bar to compute length.
+    - start_beat: Loop start in beats.
+    - length_beats: Loop length in beats.
+    """
+    try:
+        ableton = get_ableton_connection()
+        num, denom = _get_time_signature()
+
+        start = None
+        length = None
+        if start_bar > 0:
+            start = bar_to_beat(start_bar, num, denom)
+            if end_bar > start_bar:
+                length = bar_to_beat(end_bar, num, denom) - start
+        else:
+            if start_beat > 0:
+                start = start_beat
+            if length_beats > 0:
+                length = length_beats
+
+        params = {"enabled": enabled}
+        if start is not None:
+            params["start"] = start
+        if length is not None:
+            params["length"] = length
+
+        result = ableton.send_command("set_arrangement_loop", params)
+        state = "enabled" if result.get("enabled") else "disabled"
+        ls = result.get("start", 0)
+        ll = result.get("length", 0)
+        return (f"Loop {state}: bars {beat_to_bar(ls, num, denom)}-"
+                f"{beat_to_bar(ls + ll, num, denom)}")
+    except Exception as e:
+        logger.error(f"Error setting arrangement loop: {str(e)}")
+        return f"Error setting arrangement loop: {str(e)}"
+
+
+@mcp.tool()
+def jump_to_cue_point(ctx: Context, direction: str = "", name: str = "") -> str:
+    """Jump to a cue point.
+
+    Parameters:
+    - direction: "next" or "prev"
+    - name: Cue point name to jump to.
+    """
+    try:
+        ableton = get_ableton_connection()
+        params = {}
+        if direction:
+            params["direction"] = direction
+        if name:
+            params["name"] = name
+        result = ableton.send_command("jump_to_cue", params)
+        return f"Jumped to cue point: {result}"
+    except Exception as e:
+        logger.error(f"Error jumping to cue point: {str(e)}")
+        return f"Error jumping to cue point: {str(e)}"
+
+
+@mcp.tool()
+def create_cue_point(ctx: Context, bar: int = 0, beat: float = 0.0, name: str = "") -> str:
+    """Create a cue point at a position.
+
+    Parameters:
+    - bar: Bar number (1-based).
+    - beat: Beat position (0-based).
+    - name: Name for the cue point.
+    """
+    try:
+        ableton = get_ableton_connection()
+        time_val = _convert_bar_to_beat(bar, beat)
+        result = ableton.send_command("create_cue_point", {"time": time_val, "name": name})
+        return f"Created cue point '{name}' at bar {bar if bar > 0 else '?'}"
+    except Exception as e:
+        logger.error(f"Error creating cue point: {str(e)}")
+        return f"Error creating cue point: {str(e)}"
+
+
+@mcp.tool()
+def delete_cue_point(ctx: Context, bar: int = 0, beat: float = 0.0) -> str:
+    """Delete a cue point at a position.
+
+    Parameters:
+    - bar: Bar number (1-based).
+    - beat: Beat position (0-based).
+    """
+    try:
+        ableton = get_ableton_connection()
+        time_val = _convert_bar_to_beat(bar, beat)
+        ableton.send_command("delete_cue_point", {"time": time_val})
+        return f"Deleted cue point at bar {bar if bar > 0 else '?'}"
+    except Exception as e:
+        logger.error(f"Error deleting cue point: {str(e)}")
+        return f"Error deleting cue point: {str(e)}"
+
+
+@mcp.tool()
+def create_arrangement_midi_clip(
+    ctx: Context,
+    track_index: int,
+    start_bar: int = 0,
+    end_bar: int = 0,
+    start_beat: float = 0.0,
+    length_beats: float = 4.0,
+    name: str = "",
+) -> str:
+    """Create an empty MIDI clip in the arrangement.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - start_bar: Start bar (1-based). Takes precedence over start_beat.
+    - end_bar: End bar (1-based). Used with start_bar to compute length.
+    - start_beat: Start position in beats.
+    - length_beats: Clip length in beats.
+    - name: Optional clip name.
+    """
+    try:
+        ableton = get_ableton_connection()
+        num, denom = _get_time_signature()
+
+        if start_bar > 0:
+            position = bar_to_beat(start_bar, num, denom)
+            if end_bar > start_bar:
+                length = bar_to_beat(end_bar, num, denom) - position
+            else:
+                length = length_beats
+        else:
+            position = start_beat
+            length = length_beats
+
+        result = ableton.send_command("create_arrangement_clip", {
+            "track_index": track_index - 1,
+            "position": position,
+            "length": length,
+        })
+
+        msg = (f"Created MIDI clip on track {track_index} at "
+               f"bar {beat_to_bar(position, num, denom)}, "
+               f"length {length} beats")
+
+        overlapped = result.get("overlapped_clips", [])
+        if overlapped:
+            msg += f"\nWarning: overlapped existing clips: {', '.join(overlapped)}"
+
+        return msg + _ARRANGEMENT_TIP
+    except Exception as e:
+        logger.error(f"Error creating arrangement MIDI clip: {str(e)}")
+        return f"Error creating arrangement MIDI clip: {str(e)}"
+
+
+@mcp.tool()
+def create_arrangement_audio_clip(
+    ctx: Context,
+    track_index: int,
+    file_path: str,
+    start_bar: int = 0,
+    start_beat: float = 0.0,
+) -> str:
+    """Place an audio file as a clip in the arrangement.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - file_path: Path to the audio file.
+    - start_bar: Start bar (1-based).
+    - start_beat: Start position in beats.
+    """
+    try:
+        ableton = get_ableton_connection()
+        position = _convert_bar_to_beat(start_bar, start_beat)
+
+        result = ableton.send_command("create_arrangement_audio_clip", {
+            "track_index": track_index - 1,
+            "position": position,
+            "file_path": file_path,
+        })
+        return f"Created audio clip from '{file_path}' on track {track_index}" + _ARRANGEMENT_TIP
+    except Exception as e:
+        logger.error(f"Error creating arrangement audio clip: {str(e)}")
+        return f"Error creating arrangement audio clip: {str(e)}"
+
+
+@mcp.tool()
+def duplicate_clip_to_arrangement(
+    ctx: Context,
+    track_index: int,
+    clip_index: int,
+    destination_bar: int = 0,
+    destination_beat: float = 0.0,
+) -> str:
+    """Copy a session clip to the arrangement.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - clip_index: Session clip slot (1-based).
+    - destination_bar: Destination bar (1-based).
+    - destination_beat: Destination beat.
+    """
+    try:
+        ableton = get_ableton_connection()
+        dest = _convert_bar_to_beat(destination_bar, destination_beat)
+
+        result = ableton.send_command("duplicate_to_arrangement", {
+            "track_index": track_index - 1,
+            "clip_index": clip_index - 1,
+            "destination_time": dest,
+        })
+        return f"Duplicated session clip to arrangement on track {track_index}" + _ARRANGEMENT_TIP
+    except Exception as e:
+        logger.error(f"Error duplicating clip to arrangement: {str(e)}")
+        return f"Error duplicating clip to arrangement: {str(e)}"
+
+
+@mcp.tool()
+def delete_arrangement_clip(
+    ctx: Context,
+    track_index: int,
+    clip_index: int = 0,
+    clip_name: str = "",
+) -> str:
+    """Delete an arrangement clip.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - clip_index: Clip position in arrangement (1-based).
+    - clip_name: Clip name (alternative to clip_index).
+    """
+    try:
+        ableton = get_ableton_connection()
+        params = {"track_index": track_index - 1}
+        if clip_name:
+            params["clip_name"] = clip_name
+        elif clip_index > 0:
+            params["clip_index"] = clip_index - 1
+        else:
+            return "Error: provide clip_index or clip_name"
+
+        ableton.send_command("delete_arrangement_clip", params)
+        ref = f"'{clip_name}'" if clip_name else f"#{clip_index}"
+        return f"Deleted arrangement clip {ref} on track {track_index}" + _ARRANGEMENT_TIP
+    except Exception as e:
+        logger.error(f"Error deleting arrangement clip: {str(e)}")
+        return f"Error deleting arrangement clip: {str(e)}"
+
+
+@mcp.tool()
+def set_arrangement_clip_property(
+    ctx: Context,
+    track_index: int,
+    clip_index: int = 1,
+    clip_name: str = "",
+    name: str = "",
+    muted: bool = None,
+    color: int = None,
+    looping: bool = None,
+    loop_start: float = None,
+    loop_end: float = None,
+    gain: float = None,
+    pitch_coarse: int = None,
+    pitch_fine: float = None,
+    warping: bool = None,
+    warp_mode: int = None,
+) -> str:
+    """Set properties on an arrangement clip.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - clip_index: Clip position (1-based).
+    - clip_name: Clip name (alternative to clip_index).
+    - name: New clip name.
+    - muted: Mute state.
+    - color: Color (0x00RRGGBB).
+    - looping: Loop on/off.
+    - loop_start: Loop start in beats.
+    - loop_end: Loop end in beats.
+    - gain: Audio gain (0.0-1.0).
+    - pitch_coarse: Semitone pitch shift (-48 to 48).
+    - pitch_fine: Fine pitch shift (-50 to 49 cents).
+    - warping: Warp on/off.
+    - warp_mode: Warp mode (0-6).
+    """
+    try:
+        ableton = get_ableton_connection()
+        ci = clip_index - 1 if clip_index > 0 else 0
+        ti = track_index - 1
+
+        props = {
+            "name": name, "muted": muted, "color": color, "looping": looping,
+            "loop_start": loop_start, "loop_end": loop_end, "gain": gain,
+            "pitch_coarse": pitch_coarse, "pitch_fine": pitch_fine,
+            "warping": warping, "warp_mode": warp_mode,
+        }
+
+        changes = []
+        for prop_name, value in props.items():
+            if value is not None and value != "":
+                ableton.send_command("set_arrangement_clip_property", {
+                    "track_index": ti,
+                    "clip_index": ci,
+                    "property": prop_name,
+                    "value": value,
+                })
+                changes.append(f"{prop_name}={value}")
+
+        if not changes:
+            return "No properties specified to change."
+
+        ref = f"'{clip_name}'" if clip_name else f"clip {clip_index}"
+        return f"Updated {ref} on track {track_index}: {', '.join(changes)}"
+    except Exception as e:
+        logger.error(f"Error setting arrangement clip property: {str(e)}")
+        return f"Error setting arrangement clip property: {str(e)}"
+
+
+@mcp.tool()
+def set_ableton_view(ctx: Context, view: str = "Arranger") -> str:
+    """Switch Ableton's main view.
+
+    Parameters:
+    - view: View name. Options: Arranger, Session, Detail, Detail/Clip,
+            Detail/DeviceChain, Browser.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_view", {"view_name": view})
+        return f"Switched to {view} view"
+    except Exception as e:
+        logger.error(f"Error setting view: {str(e)}")
+        return f"Error setting view: {str(e)}"
+
+
+@mcp.tool()
+def control_arrangement_view(ctx: Context, action: str, track_index: int = 0) -> str:
+    """Control the arrangement view.
+
+    Parameters:
+    - action: One of: zoom_in, zoom_out, scroll_left, scroll_right,
+              follow_on, follow_off, collapse_track, expand_track.
+    - track_index: Track number (1-based, for collapse/expand).
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = track_index - 1 if track_index > 0 else 0
+        result = ableton.send_command("control_arrangement_view", {
+            "action": action,
+            "track_index": ti,
+        })
+        return f"Arrangement view: {action} done"
+    except Exception as e:
+        logger.error(f"Error controlling arrangement view: {str(e)}")
+        return f"Error controlling arrangement view: {str(e)}"
+
+
+@mcp.tool()
+def manage_clip_automation(
+    ctx: Context,
+    track_index: int,
+    clip_index: int = 1,
+    clip_name: str = "",
+    action: str = "create",
+    parameter_name: str = "volume",
+) -> str:
+    """Create or clear automation envelopes on arrangement clips.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - clip_index: Clip position (1-based).
+    - clip_name: Clip name (alternative to clip_index).
+    - action: "create", "clear", or "clear_all".
+    - parameter_name: Parameter to automate (e.g., "volume", "panning").
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("manage_clip_automation", {
+            "track_index": track_index - 1,
+            "clip_index": clip_index - 1 if clip_index > 0 else 0,
+            "action": action,
+            "parameter_name": parameter_name,
+        })
+
+        if action == "clear_all":
+            return f"Cleared all automation on clip {clip_index}, track {track_index}"
+        return f"Automation {action}: {parameter_name} on clip {clip_index}, track {track_index}"
+    except Exception as e:
+        logger.error(f"Error managing clip automation: {str(e)}")
+        return f"Error managing clip automation: {str(e)}"
+
 
 # Main execution
 def main():
