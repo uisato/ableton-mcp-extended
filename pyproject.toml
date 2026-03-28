@@ -38,3 +38,9 @@ xy_controller = [
     "pynput>=1.7.6",
     "screeninfo>=0.8.1",
 ]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: requires running Ableton Live instance",
+]
+addopts = "-m 'not integration'"
