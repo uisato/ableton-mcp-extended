@@ -114,6 +114,8 @@ class AbletonConnection:
             "set_view", "control_arrangement_view",
             "manage_clip_automation",
             "add_notes_to_arrangement_clip",
+            "set_device_parameter", "set_device_enabled",
+            "delete_device", "navigate_preset",
         ]
         
         try:
@@ -197,6 +199,39 @@ mcp = FastMCP(
     description="Ableton Live integration through the Model Context Protocol",
     lifespan=server_lifespan
 )
+
+# Parameter normalization utilities
+
+
+def normalize_param(value: float, min_val: float, max_val: float) -> float:
+    """Normalize a raw parameter value to 0.0-1.0 range.
+
+    Parameters:
+    - value: raw parameter value
+    - min_val: parameter minimum
+    - max_val: parameter maximum
+
+    Returns normalized value clamped to 0.0-1.0.
+    """
+    if max_val == min_val:
+        return 0.0
+    normalized = (value - min_val) / (max_val - min_val)
+    return max(0.0, min(1.0, normalized))
+
+
+def denormalize_param(normalized: float, min_val: float, max_val: float) -> float:
+    """Convert a normalized 0.0-1.0 value to raw parameter range.
+
+    Parameters:
+    - normalized: value in 0.0-1.0 range
+    - min_val: parameter minimum
+    - max_val: parameter maximum
+
+    Returns raw value. Input is clamped to 0.0-1.0 before conversion.
+    """
+    clamped = max(0.0, min(1.0, normalized))
+    return min_val + clamped * (max_val - min_val)
+
 
 # Bar/beat conversion utilities
 
@@ -1191,6 +1226,407 @@ def manage_clip_automation(
     except Exception as e:
         logger.error(f"Error managing clip automation: {str(e)}")
         return f"Error managing clip automation: {str(e)}"
+
+
+# ── Device / Parameter Tools ──────────────────────────────────────
+
+@mcp.tool()
+def get_device_parameters(
+    ctx: Context,
+    track_index: int,
+    device_index: int = 1,
+    chain_index: int = 0,
+    category: str = "",
+    show_all: bool = False,
+) -> str:
+    """List parameters for a device on a track.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - device_index: Device number on the track (1-based, default 1).
+    - chain_index: Chain number inside a rack (1-based, 0 = no chain).
+    - category: Filter by category name (returns detail for that category).
+    - show_all: If True, return all parameters in detail mode.
+
+    Default mode returns a summary grouped by category with counts.
+    Specify category or show_all=True for full parameter details.
+    """
+    try:
+        from MCP_Server.plugin_aliases import get_categories, get_alias_for_param
+
+        ableton = get_ableton_connection()
+        ci = chain_index - 1 if chain_index > 0 else None
+        result = ableton.send_command("get_device_parameters", {
+            "track_index": track_index - 1,
+            "device_index": device_index - 1,
+            "chain_index": ci,
+            "show_all": True,  # Always get full list from RS, group MCP-side
+        })
+
+        device_name = result.get("device_name", "Unknown")
+        params = result.get("parameters", [])
+        param_count = result.get("parameter_count", len(params))
+
+        # Attach aliases
+        for p in params:
+            alias = get_alias_for_param(device_name, p["name"])
+            if alias:
+                p["alias"] = alias
+
+        # Category grouping
+        categories = get_categories(device_name)
+
+        def categorize(p_name):
+            if categories:
+                for cat_name, prefixes in categories.items():
+                    for prefix in prefixes:
+                        if p_name.startswith(prefix):
+                            return cat_name
+            return "Other"
+
+        # Detail mode
+        if show_all or category:
+            filtered = params
+            if category:
+                filtered = [p for p in params if categorize(p["name"]).lower() == category.lower()]
+                if not filtered:
+                    return "No parameters found in category '{0}'. Available categories: {1}".format(
+                        category, ", ".join(sorted(set(categorize(p["name"]) for p in params))))
+
+            lines = ["{0} — {1} parameters".format(device_name, len(filtered)), ""]
+            for p in filtered:
+                alias_str = " ({0})".format(p["alias"]) if p.get("alias") else ""
+                enabled_str = "" if p["is_enabled"] else " [disabled]"
+                lines.append("  {0}. {1}{2}: {3} (normalized {4}){5}".format(
+                    p["index"] + 1, p["name"], alias_str,
+                    p["display_value"], round(p["value"], 2), enabled_str))
+            return "\n".join(lines)
+
+        # Summary mode
+        groups = {}
+        for p in params:
+            cat = categorize(p["name"])
+            groups.setdefault(cat, []).append(p)
+
+        lines = ["{0} — {1} parameters total".format(device_name, param_count), ""]
+        for cat_name, cat_params in groups.items():
+            lines.append("  {0}: {1} parameters".format(cat_name, len(cat_params)))
+        lines.append("")
+        lines.append("Use category='<name>' or show_all=True for full details.")
+        return "\n".join(lines)
+    except Exception as e:
+        logger.error(f"Error getting device parameters: {str(e)}")
+        return f"Error getting device parameters: {str(e)}"
+
+
+@mcp.tool()
+def set_device_parameter(
+    ctx: Context,
+    track_index: int,
+    device_index: int = 1,
+    chain_index: int = 0,
+    parameter_name: str = "",
+    parameter_index: int = 0,
+    value: float = 0.0,
+) -> str:
+    """Set a device parameter value.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - device_index: Device number (1-based, default 1).
+    - chain_index: Chain number inside a rack (1-based, 0 = no chain).
+    - parameter_name: Parameter name, friendly alias, or partial match.
+    - parameter_index: Parameter number (1-based, alternative to name).
+    - value: Normalized value 0.0-1.0.
+    """
+    try:
+        from MCP_Server.plugin_aliases import resolve_alias
+
+        ableton = get_ableton_connection()
+
+        # Resolve alias if parameter_name is provided
+        resolved_name = parameter_name
+        alias_used = None
+        if parameter_name:
+            # First get device name for alias resolution
+            ci = chain_index - 1 if chain_index > 0 else None
+            info = ableton.send_command("get_device_parameters", {
+                "track_index": track_index - 1,
+                "device_index": device_index - 1,
+                "chain_index": ci,
+                "show_all": False,
+            })
+            device_name = info.get("device_name", "")
+            real_name = resolve_alias(device_name, parameter_name)
+            if real_name:
+                alias_used = parameter_name
+                resolved_name = real_name
+
+        result = ableton.send_command("set_device_parameter", {
+            "track_index": track_index - 1,
+            "device_index": device_index - 1,
+            "chain_index": chain_index - 1 if chain_index > 0 else None,
+            "parameter_name": resolved_name if resolved_name else None,
+            "parameter_index": parameter_index - 1 if parameter_index > 0 else None,
+            "value": value,
+        })
+
+        param_name = result.get("parameter_name", "?")
+        display = result.get("display_value", "?")
+        new_val = result.get("new_value", value)
+        clamped = result.get("clamped", False)
+
+        msg = "Set {0} to {1} (normalized {2})".format(param_name, display, round(new_val, 2))
+        if alias_used:
+            msg += " [alias: {0}]".format(alias_used)
+        if clamped:
+            msg += " (value was clamped to 0.0-1.0 range)"
+        return msg
+    except Exception as e:
+        logger.error(f"Error setting device parameter: {str(e)}")
+        return f"Error setting device parameter: {str(e)}"
+
+
+@mcp.tool()
+def enable_device(
+    ctx: Context,
+    track_index: int,
+    device_index: int = 0,
+    device_name: str = "",
+    chain_index: int = 0,
+) -> str:
+    """Enable (activate) a device on a track.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - device_index: Device number (1-based). Use 0 if using device_name.
+    - device_name: Device name (alternative to device_index).
+    - chain_index: Chain number inside a rack (1-based, 0 = no chain).
+    """
+    return _toggle_device(track_index, device_index, device_name, chain_index, True)
+
+
+@mcp.tool()
+def disable_device(
+    ctx: Context,
+    track_index: int,
+    device_index: int = 0,
+    device_name: str = "",
+    chain_index: int = 0,
+) -> str:
+    """Disable (bypass) a device on a track.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - device_index: Device number (1-based). Use 0 if using device_name.
+    - device_name: Device name (alternative to device_index).
+    - chain_index: Chain number inside a rack (1-based, 0 = no chain).
+    """
+    return _toggle_device(track_index, device_index, device_name, chain_index, False)
+
+
+def _toggle_device(track_index, device_index, device_name, chain_index, enabled):
+    """Shared logic for enable/disable device."""
+    try:
+        ableton = get_ableton_connection()
+
+        di = device_index - 1 if device_index > 0 else 0
+
+        # If device_name provided, resolve to index
+        if device_name and device_index <= 0:
+            info = ableton.send_command("get_track_info", {"track_index": track_index - 1})
+            devices = info.get("devices", [])
+            matches = [d for d in devices if d["name"].lower() == device_name.lower()]
+            if len(matches) == 0:
+                return "Error: Device '{0}' not found on track {1}".format(device_name, track_index)
+            if len(matches) > 1:
+                match_list = ", ".join("{0} (index {1})".format(d["name"], d["index"] + 1) for d in matches)
+                return "Error: Multiple devices named '{0}' on track {1}: {2}".format(
+                    device_name, track_index, match_list)
+            di = matches[0]["index"]
+
+        result = ableton.send_command("set_device_enabled", {
+            "track_index": track_index - 1,
+            "device_index": di,
+            "chain_index": chain_index - 1 if chain_index > 0 else None,
+            "enabled": enabled,
+        })
+
+        name = result.get("device_name", "?")
+        state = "enabled" if result.get("is_active", enabled) else "disabled"
+        return "{0} {1}".format(name, state)
+    except Exception as e:
+        logger.error(f"Error toggling device: {str(e)}")
+        return f"Error toggling device: {str(e)}"
+
+
+@mcp.tool()
+def get_chain_info(
+    ctx: Context,
+    track_index: int,
+    device_index: int = 1,
+    chain_index: int = 0,
+) -> str:
+    """List chains in a rack device, or devices within a specific chain.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - device_index: Device number (1-based, default 1).
+    - chain_index: Chain number (1-based) to drill into. 0 = list all chains.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_chain_info", {
+            "track_index": track_index - 1,
+            "device_index": device_index - 1,
+            "chain_index": chain_index - 1 if chain_index > 0 else None,
+        })
+
+        if chain_index > 0:
+            # Detail for specific chain
+            chain_name = result.get("chain_name", "?")
+            devices = result.get("devices", [])
+            lines = ["Chain '{0}' — {1} devices".format(chain_name, len(devices)), ""]
+            for d in devices:
+                active = "" if d.get("is_active", True) else " [disabled]"
+                lines.append("  {0}. {1} ({2}, {3} params){4}".format(
+                    d["index"] + 1, d["name"], d["type"],
+                    d.get("parameter_count", "?"), active))
+            return "\n".join(lines)
+        else:
+            # List all chains
+            device_name = result.get("device_name", "?")
+            chains = result.get("chains", [])
+            lines = ["{0} — {1} chains".format(device_name, len(chains)), ""]
+            for c in chains:
+                mute_str = " [muted]" if c.get("mute") else ""
+                solo_str = " [solo]" if c.get("solo") else ""
+                dev_names = ", ".join(d["name"] for d in c.get("devices", []))
+                lines.append("  {0}. {1}{2}{3}: {4} devices ({5})".format(
+                    c["index"] + 1, c["name"], mute_str, solo_str,
+                    c["device_count"], dev_names or "empty"))
+            return "\n".join(lines)
+    except Exception as e:
+        logger.error(f"Error getting chain info: {str(e)}")
+        return f"Error getting chain info: {str(e)}"
+
+
+@mcp.tool()
+def get_drum_pad_info(ctx: Context, track_index: int, device_index: int = 1) -> str:
+    """List filled drum pads in a Drum Rack.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - device_index: Device number (1-based, default 1).
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_drum_pad_info", {
+            "track_index": track_index - 1,
+            "device_index": device_index - 1,
+        })
+
+        device_name = result.get("device_name", "?")
+        pads = result.get("filled_pads", [])
+        lines = ["{0} — {1} filled pads".format(device_name, len(pads)), ""]
+        for pad in pads:
+            mute_str = " [muted]" if pad.get("mute") else ""
+            solo_str = " [solo]" if pad.get("solo") else ""
+            dev_names = []
+            for chain in pad.get("chains", []):
+                for d in chain.get("devices", []):
+                    dev_names.append(d["name"])
+            lines.append("  Note {0}: {1}{2}{3} → {4}".format(
+                pad["note"], pad["name"], mute_str, solo_str,
+                ", ".join(dev_names) or "empty"))
+        return "\n".join(lines)
+    except Exception as e:
+        logger.error(f"Error getting drum pad info: {str(e)}")
+        return f"Error getting drum pad info: {str(e)}"
+
+
+@mcp.tool()
+def delete_device(
+    ctx: Context,
+    track_index: int,
+    device_index: int = 0,
+    device_name: str = "",
+) -> str:
+    """Delete a device from a track.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - device_index: Device number (1-based).
+    - device_name: Device name (alternative to device_index).
+    """
+    try:
+        ableton = get_ableton_connection()
+
+        di = device_index - 1 if device_index > 0 else 0
+
+        # Resolve by name if needed
+        if device_name and device_index <= 0:
+            info = ableton.send_command("get_track_info", {"track_index": track_index - 1})
+            devices = info.get("devices", [])
+            matches = [d for d in devices if d["name"].lower() == device_name.lower()]
+            if len(matches) == 0:
+                return "Error: Device '{0}' not found on track {1}".format(device_name, track_index)
+            if len(matches) > 1:
+                match_list = ", ".join("{0} (index {1})".format(d["name"], d["index"] + 1) for d in matches)
+                return "Error: Multiple devices named '{0}': {1}".format(device_name, match_list)
+            di = matches[0]["index"]
+
+        result = ableton.send_command("delete_device", {
+            "track_index": track_index - 1,
+            "device_index": di,
+        })
+
+        return "Deleted {0}. {1} devices remaining.".format(
+            result.get("deleted_device", "device"),
+            result.get("remaining_devices", "?"))
+    except Exception as e:
+        logger.error(f"Error deleting device: {str(e)}")
+        return f"Error deleting device: {str(e)}"
+
+
+@mcp.tool()
+def navigate_device_preset(
+    ctx: Context,
+    track_index: int,
+    device_index: int = 1,
+    chain_index: int = 0,
+    direction: str = "next",
+) -> str:
+    """Navigate device presets (next/previous/current).
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - device_index: Device number (1-based, default 1).
+    - chain_index: Chain number inside a rack (1-based, 0 = no chain).
+    - direction: "next", "previous", or "current".
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("navigate_preset", {
+            "track_index": track_index - 1,
+            "device_index": device_index - 1,
+            "chain_index": chain_index - 1 if chain_index > 0 else None,
+            "direction": direction,
+        })
+
+        preset_name = result.get("preset_name", "?")
+        preset_idx = result.get("preset_index", 0)
+        preset_count = result.get("preset_count", 0)
+        device_n = result.get("device_name", "?")
+
+        if direction == "current":
+            return "{0}: current preset is '{1}' ({2}/{3})".format(
+                device_n, preset_name, preset_idx + 1, preset_count)
+        return "{0}: loaded preset '{1}' ({2}/{3})".format(
+            device_n, preset_name, preset_idx + 1, preset_count)
+    except Exception as e:
+        logger.error(f"Error navigating preset: {str(e)}")
+        return f"Error navigating preset: {str(e)}"
 
 
 # Main execution

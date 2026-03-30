@@ -237,7 +237,9 @@ class AbletonMCP(ControlSurface):
                                  "set_arrangement_clip_property",
                                  "set_view", "control_arrangement_view",
                                  "manage_clip_automation",
-                                 "add_notes_to_arrangement_clip"]:
+                                 "add_notes_to_arrangement_clip",
+                                 "set_device_parameter", "set_device_enabled",
+                                 "delete_device", "navigate_preset"]:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
@@ -353,6 +355,31 @@ class AbletonMCP(ControlSurface):
                             ci = params.get("clip_index", 0)
                             notes = params.get("notes", [])
                             result = self._add_notes_to_arrangement_clip(ti, ci, notes)
+                        # Device modifying commands
+                        elif command_type == "set_device_parameter":
+                            ti = params.get("track_index", 0)
+                            di = params.get("device_index", 0)
+                            ci = params.get("chain_index", None)
+                            pn = params.get("parameter_name", None)
+                            pi = params.get("parameter_index", None)
+                            val = params.get("value", 0.0)
+                            result = self._set_device_parameter(ti, di, ci, pn, pi, val)
+                        elif command_type == "set_device_enabled":
+                            ti = params.get("track_index", 0)
+                            di = params.get("device_index", 0)
+                            ci = params.get("chain_index", None)
+                            enabled = params.get("enabled", True)
+                            result = self._set_device_enabled(ti, di, ci, enabled)
+                        elif command_type == "delete_device":
+                            ti = params.get("track_index", 0)
+                            di = params.get("device_index", 0)
+                            result = self._delete_device(ti, di)
+                        elif command_type == "navigate_preset":
+                            ti = params.get("track_index", 0)
+                            di = params.get("device_index", 0)
+                            ci = params.get("chain_index", None)
+                            direction = params.get("direction", "current")
+                            result = self._navigate_preset(ti, di, ci, direction)
 
                         # Put the result in the queue
                         response_queue.put({"status": "success", "result": result})
@@ -402,6 +429,22 @@ class AbletonMCP(ControlSurface):
                 response["result"] = self._get_arrangement_info(track_index)
             elif command_type == "get_cue_points":
                 response["result"] = self._get_cue_points()
+            # Device read-only commands
+            elif command_type == "get_device_parameters":
+                ti = params.get("track_index", 0)
+                di = params.get("device_index", 0)
+                ci = params.get("chain_index", None)
+                show_all = params.get("show_all", False)
+                response["result"] = self._get_device_parameters(ti, di, ci, show_all)
+            elif command_type == "get_chain_info":
+                ti = params.get("track_index", 0)
+                di = params.get("device_index", 0)
+                ci = params.get("chain_index", None)
+                response["result"] = self._get_chain_info(ti, di, ci)
+            elif command_type == "get_drum_pad_info":
+                ti = params.get("track_index", 0)
+                di = params.get("device_index", 0)
+                response["result"] = self._get_drum_pad_info(ti, di)
             else:
                 response["status"] = "error"
                 response["message"] = "Unknown command: " + command_type
@@ -935,7 +978,8 @@ class AbletonMCP(ControlSurface):
                     browser_or_item.sounds,
                     browser_or_item.drums,
                     browser_or_item.audio_effects,
-                    browser_or_item.midi_effects
+                    browser_or_item.midi_effects,
+                    browser_or_item.plugins,
                 ]
                 
                 for category in categories:
@@ -1290,7 +1334,388 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error managing clip automation: " + str(e))
             raise
 
-    # Helper methods
+    # ── Device command handlers ──────────────────────────────────────
+
+    def _get_device_parameters(self, track_index, device_index, chain_index=None, show_all=False):
+        """Return parameter list for a device."""
+        try:
+            track, device = self._resolve_device(track_index, device_index)
+
+            # If chain_index, navigate into chain
+            target_device = device
+            if chain_index is not None:
+                if not device.can_have_chains:
+                    raise ValueError("Device '{0}' is not a rack".format(device.name))
+                chains = device.chains
+                if chain_index < 0 or chain_index >= len(chains):
+                    raise IndexError("Chain index {0} out of range".format(chain_index))
+                chain = chains[chain_index]
+                if not chain.devices:
+                    raise ValueError("Chain '{0}' has no devices".format(chain.name))
+                target_device = chain.devices[0]
+
+            params = target_device.parameters
+            param_list = []
+            for i, p in enumerate(params):
+                pmin = p.min
+                pmax = p.max
+                raw_val = p.value
+                norm = (raw_val - pmin) / (pmax - pmin) if pmax != pmin else 0.0
+                entry = {
+                    "index": i,
+                    "name": p.name,
+                    "value": round(norm, 4),
+                    "min": pmin,
+                    "max": pmax,
+                    "display_value": str(p),
+                    "is_enabled": p.is_enabled,
+                    "is_quantized": p.is_quantized,
+                    "value_items": list(p.value_items) if p.is_quantized else [],
+                }
+                param_list.append(entry)
+
+            result = {
+                "device_name": target_device.name,
+                "device_class": target_device.class_name,
+                "parameter_count": len(params),
+                "parameters": param_list,
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error getting device parameters: " + str(e))
+            raise
+
+    def _set_device_parameter(self, track_index, device_index, chain_index=None,
+                              parameter_name=None, parameter_index=None, value=0.0):
+        """Set a device parameter by name or index. Value is normalized 0.0-1.0."""
+        try:
+            track, device = self._resolve_device(track_index, device_index)
+
+            target_device = device
+            if chain_index is not None:
+                if not device.can_have_chains:
+                    raise ValueError("Device '{0}' is not a rack".format(device.name))
+                chain = device.chains[chain_index]
+                if not chain.devices:
+                    raise ValueError("Chain '{0}' has no devices".format(chain.name))
+                target_device = chain.devices[0]
+
+            param, match_type = self._find_parameter(
+                target_device, name=parameter_name, index=parameter_index)
+
+            if not param.is_enabled:
+                raise ValueError("Parameter '{0}' is currently disabled".format(param.name))
+
+            pmin = param.min
+            pmax = param.max
+            old_norm = (param.value - pmin) / (pmax - pmin) if pmax != pmin else 0.0
+
+            # Clamp normalized value
+            clamped = max(0.0, min(1.0, value))
+            was_clamped = (clamped != value)
+
+            # Denormalize
+            raw_value = pmin + clamped * (pmax - pmin)
+            param.value = raw_value
+
+            return {
+                "parameter_name": param.name,
+                "old_value": round(old_norm, 4),
+                "new_value": round(clamped, 4),
+                "display_value": str(param),
+                "clamped": was_clamped,
+            }
+        except Exception as e:
+            self.log_message("Error setting device parameter: " + str(e))
+            raise
+
+    def _set_device_enabled(self, track_index, device_index, chain_index=None, enabled=True):
+        """Enable or disable a device via its 'Device On' parameter."""
+        try:
+            track, device = self._resolve_device(track_index, device_index)
+
+            target_device = device
+            if chain_index is not None:
+                if not device.can_have_chains:
+                    raise ValueError("Device '{0}' is not a rack".format(device.name))
+                chain = device.chains[chain_index]
+                if not chain.devices:
+                    raise ValueError("Chain has no devices")
+                target_device = chain.devices[0]
+
+            # Use "Device On" parameter (always index 0) instead of
+            # is_active which is read-only in the Live API.
+            params = target_device.parameters
+            if not params:
+                raise ValueError("Device '{0}' has no parameters".format(target_device.name))
+            on_param = params[0]
+            on_param.value = on_param.max if enabled else on_param.min
+
+            return {
+                "device_name": target_device.name,
+                "is_active": enabled,
+            }
+        except Exception as e:
+            self.log_message("Error setting device enabled: " + str(e))
+            raise
+
+    def _get_chain_info(self, track_index, device_index, chain_index=None):
+        """Get chain information for a rack device."""
+        try:
+            track, device = self._resolve_device(track_index, device_index)
+
+            if not device.can_have_chains:
+                raise ValueError("Device '{0}' is not a rack and has no chains".format(device.name))
+
+            if chain_index is not None:
+                # Detail for a specific chain
+                chains = device.chains
+                if chain_index < 0 or chain_index >= len(chains):
+                    raise IndexError("Chain index {0} out of range".format(chain_index))
+                chain = chains[chain_index]
+                devices = []
+                for di, d in enumerate(chain.devices):
+                    devices.append({
+                        "index": di,
+                        "name": d.name,
+                        "class_name": d.class_name,
+                        "type": self._get_device_type(d),
+                        "is_active": d.is_active,
+                        "parameter_count": len(d.parameters),
+                    })
+                return {
+                    "chain_name": chain.name,
+                    "devices": devices,
+                }
+            else:
+                # List all chains
+                chain_list = []
+                for ci, chain in enumerate(device.chains):
+                    chain_devices = []
+                    for di, d in enumerate(chain.devices):
+                        chain_devices.append({
+                            "index": di,
+                            "name": d.name,
+                            "type": self._get_device_type(d),
+                        })
+                    chain_list.append({
+                        "index": ci,
+                        "name": chain.name,
+                        "mute": chain.mute,
+                        "solo": chain.solo,
+                        "device_count": len(chain.devices),
+                        "devices": chain_devices,
+                    })
+                return {
+                    "device_name": device.name,
+                    "chain_count": len(device.chains),
+                    "chains": chain_list,
+                }
+        except Exception as e:
+            self.log_message("Error getting chain info: " + str(e))
+            raise
+
+    def _get_drum_pad_info(self, track_index, device_index):
+        """Get drum pad info for a Drum Rack."""
+        try:
+            track, device = self._resolve_device(track_index, device_index)
+
+            if not device.can_have_drum_pads:
+                raise ValueError("Device '{0}' is not a Drum Rack".format(device.name))
+
+            filled_pads = []
+            for pad in device.drum_pads:
+                if pad.chains:
+                    pad_devices = []
+                    for chain in pad.chains:
+                        for d in chain.devices:
+                            pad_devices.append({
+                                "index": 0,
+                                "name": d.name,
+                                "type": self._get_device_type(d),
+                            })
+                    filled_pads.append({
+                        "note": pad.note,
+                        "name": pad.name,
+                        "mute": pad.mute,
+                        "solo": pad.solo,
+                        "chains": [{
+                            "name": c.name,
+                            "devices": [{"index": di, "name": d.name, "type": self._get_device_type(d)}
+                                        for di, d in enumerate(c.devices)]
+                        } for c in pad.chains],
+                    })
+
+            return {
+                "device_name": device.name,
+                "filled_pads": filled_pads,
+            }
+        except Exception as e:
+            self.log_message("Error getting drum pad info: " + str(e))
+            raise
+
+    def _delete_device(self, track_index, device_index):
+        """Delete a device from a track."""
+        try:
+            track, device = self._resolve_device(track_index, device_index)
+            device_name = device.name
+            track.delete_device(device_index)
+            return {
+                "deleted_device": device_name,
+                "remaining_devices": len(track.devices),
+            }
+        except Exception as e:
+            self.log_message("Error deleting device: " + str(e))
+            raise
+
+    def _navigate_preset(self, track_index, device_index, chain_index=None, direction="current"):
+        """Navigate device presets."""
+        try:
+            track, device = self._resolve_device(track_index, device_index)
+
+            target_device = device
+            if chain_index is not None:
+                if not device.can_have_chains:
+                    raise ValueError("Device '{0}' is not a rack".format(device.name))
+                chain = device.chains[chain_index]
+                if not chain.devices:
+                    raise ValueError("Chain has no devices")
+                target_device = chain.devices[0]
+
+            if not hasattr(target_device, 'presets') or not target_device.presets:
+                raise ValueError("Device '{0}' has no presets available".format(
+                    target_device.name))
+
+            presets = list(target_device.presets)
+            current_idx = target_device.selected_preset_index
+
+            if direction == "next":
+                new_idx = min(current_idx + 1, len(presets) - 1)
+                target_device.selected_preset_index = new_idx
+            elif direction == "previous":
+                new_idx = max(current_idx - 1, 0)
+                target_device.selected_preset_index = new_idx
+            elif direction == "current":
+                new_idx = current_idx
+            else:
+                raise ValueError("Invalid direction: {0}".format(direction))
+
+            return {
+                "device_name": target_device.name,
+                "preset_name": presets[new_idx] if new_idx < len(presets) else "",
+                "preset_index": new_idx,
+                "preset_count": len(presets),
+            }
+        except Exception as e:
+            self.log_message("Error navigating preset: " + str(e))
+            raise
+
+    # Device helper methods
+
+    def _resolve_device(self, track_index, device_index, chain_index=None):
+        """Resolve a device reference to (track, device) tuple.
+
+        Parameters:
+        - track_index: 0-based track index
+        - device_index: 0-based device index on track (or within chain)
+        - chain_index: optional 0-based chain index for rack devices
+
+        Returns (track, device) tuple.
+        Raises IndexError or ValueError on invalid references.
+        """
+        if track_index < 0 or track_index >= len(self._song.tracks):
+            raise IndexError("Track index {0} out of range (0-{1})".format(
+                track_index, len(self._song.tracks) - 1))
+
+        track = self._song.tracks[track_index]
+
+        if device_index < 0 or device_index >= len(track.devices):
+            raise IndexError("Device index {0} out of range on track '{1}' (0-{2})".format(
+                device_index, track.name,
+                len(track.devices) - 1 if track.devices else 0))
+
+        device = track.devices[device_index]
+
+        if chain_index is not None:
+            # Navigate into rack chain
+            if not device.can_have_chains:
+                raise ValueError("Device '{0}' is not a rack and has no chains".format(device.name))
+            chains = device.chains
+            if chain_index < 0 or chain_index >= len(chains):
+                raise IndexError("Chain index {0} out of range on '{1}' (0-{2})".format(
+                    chain_index, device.name, len(chains) - 1))
+            # Return the first device in the chain (or the chain's device list)
+            # For now, return the chain's first device. If a nested device_index
+            # is needed, callers can extend this.
+            chain = chains[chain_index]
+            if not chain.devices:
+                raise ValueError("Chain '{0}' has no devices".format(chain.name))
+            # Use device_index 0 within the chain for now (callers pass separate index)
+            return track, device
+
+        return track, device
+
+    def _find_parameter(self, device, name=None, index=None):
+        """Find a parameter on a device by name or index.
+
+        Lookup order:
+        1. Exact name match (case-sensitive)
+        2. Case-insensitive exact match
+        3. Case-insensitive partial match
+        4. By 0-based index
+
+        Returns (parameter, match_type) tuple where match_type is
+        'exact', 'case_insensitive', 'partial', or 'index'.
+        Raises ValueError if not found.
+        """
+        params = device.parameters
+
+        if name is not None:
+            # Step 1: exact match
+            for p in params:
+                if p.name == name:
+                    return p, "exact"
+
+            # Step 2: case-insensitive exact match
+            name_lower = name.lower()
+            for p in params:
+                if p.name.lower() == name_lower:
+                    return p, "case_insensitive"
+
+            # Step 3: case-insensitive partial match
+            for p in params:
+                if name_lower in p.name.lower():
+                    return p, "partial"
+
+            raise ValueError("Parameter '{0}' not found on device '{1}'".format(
+                name, device.name))
+
+        if index is not None:
+            if index < 0 or index >= len(params):
+                raise IndexError("Parameter index {0} out of range on '{1}' (0-{2})".format(
+                    index, device.name, len(params) - 1))
+            return params[index], "index"
+
+        raise ValueError("Either name or index must be provided")
+
+    def _get_device_info(self, device):
+        """Build a device info dict."""
+        info = {
+            "name": device.name,
+            "class_name": device.class_name,
+            "type": self._get_device_type(device),
+            "is_active": device.is_active,
+            "can_have_chains": device.can_have_chains,
+            "can_have_drum_pads": device.can_have_drum_pads,
+            "parameter_count": len(device.parameters),
+        }
+        try:
+            info["class_display_name"] = device.class_display_name
+        except Exception:
+            info["class_display_name"] = device.class_name
+        return info
+
+    # General helper methods
 
     def _get_device_type(self, device):
         """Get the type of a device"""
