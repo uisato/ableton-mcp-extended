@@ -116,6 +116,7 @@ class AbletonConnection:
             "add_notes_to_arrangement_clip",
             "set_device_parameter", "set_device_enabled",
             "delete_device", "navigate_preset",
+            "set_track_volume", "set_track_panning",
         ]
         
         try:
@@ -196,7 +197,7 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
 # Create the MCP server with lifespan support
 mcp = FastMCP(
     "AbletonMCP",
-    description="Ableton Live integration through the Model Context Protocol",
+    instructions="Ableton Live integration through the Model Context Protocol",
     lifespan=server_lifespan
 )
 
@@ -386,6 +387,101 @@ def set_track_name(ctx: Context, track_index: int, name: str) -> str:
     except Exception as e:
         logger.error(f"Error setting track name: {str(e)}")
         return f"Error setting track name: {str(e)}"
+
+
+@mcp.tool()
+def get_track_volume(ctx: Context, track_index: int) -> str:
+    """Get the current fader volume and panning for a track.
+
+    Returns the raw normalized value, its min/max range, and the panning.
+    Volume 0.85 = 0 dB unity gain. Use this before set_track_volume to
+    understand the current state.
+
+    Parameters:
+    - track_index: Track number (1-based). Return tracks come after session tracks.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_track_volume", {"track_index": track_index - 1})
+        vol = result.get("volume", 0)
+        pan = result.get("panning", 0)
+        name = result.get("track_name", "?")
+        vol_min = result.get("volume_min", 0)
+        vol_max = result.get("volume_max", 1)
+        # Approximate dB: unity is at 0.85 normalized
+        unity = 0.85
+        if vol > 0:
+            import math
+            db_approx = 20 * math.log10(vol / unity) if vol > 0 else -float('inf')
+            db_str = f"{db_approx:+.1f} dB" if vol > 0 else "-inf dB"
+        else:
+            db_str = "-inf dB"
+        pan_str = "center" if abs(pan) < 0.01 else (f"{abs(pan):.2f} {'L' if pan < 0 else 'R'}")
+        return (
+            f"Track '{name}':\n"
+            f"  Volume: {vol:.4f} (range {vol_min:.2f}–{vol_max:.2f}) ≈ {db_str}\n"
+            f"  Panning: {pan:.4f} ({pan_str})\n"
+            f"  Unity gain (0 dB) = 0.85"
+        )
+    except Exception as e:
+        logger.error(f"Error getting track volume: {str(e)}")
+        return f"Error getting track volume: {str(e)}"
+
+
+@mcp.tool()
+def set_track_volume(ctx: Context, track_index: int, volume: float) -> str:
+    """Set the mixer fader volume for a track directly.
+
+    This controls the actual track fader, not any device parameter.
+
+    Volume scale (normalized):
+      0.0   = silence
+      0.85  = 0 dB (unity gain, Ableton's default fader position)
+      1.0   = maximum (~+6 dB)
+
+    Parameters:
+    - track_index: Track number (1-based). Return tracks come after session tracks.
+    - volume: Normalized volume 0.0–1.0. Use 0.85 for unity (0 dB).
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_track_volume", {
+            "track_index": track_index - 1,
+            "volume": volume,
+        })
+        name = result.get("track_name", "?")
+        vol = result.get("volume", volume)
+        import math
+        unity = 0.85
+        db_str = f"{20 * math.log10(vol / unity):+.1f} dB" if vol > 0 else "-inf dB"
+        return f"Set '{name}' fader to {vol:.4f} (≈ {db_str})"
+    except Exception as e:
+        logger.error(f"Error setting track volume: {str(e)}")
+        return f"Error setting track volume: {str(e)}"
+
+
+@mcp.tool()
+def set_track_panning(ctx: Context, track_index: int, panning: float) -> str:
+    """Set the mixer panning for a track.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - panning: -1.0 = full left, 0.0 = center, +1.0 = full right.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_track_panning", {
+            "track_index": track_index - 1,
+            "panning": panning,
+        })
+        name = result.get("track_name", "?")
+        pan = result.get("panning", panning)
+        pan_str = "center" if abs(pan) < 0.01 else (f"{abs(pan):.2f} {'L' if pan < 0 else 'R'}")
+        return f"Set '{name}' panning to {pan:.4f} ({pan_str})"
+    except Exception as e:
+        logger.error(f"Error setting track panning: {str(e)}")
+        return f"Error setting track panning: {str(e)}"
+
 
 @mcp.tool()
 def create_clip(ctx: Context, track_index: int, clip_index: int, length: float = 4.0) -> str:
@@ -1587,6 +1683,49 @@ def delete_device(
     except Exception as e:
         logger.error(f"Error deleting device: {str(e)}")
         return f"Error deleting device: {str(e)}"
+
+
+@mcp.tool()
+def delete_track(
+    ctx: Context,
+    track_index: int = 0,
+    track_name: str = "",
+) -> str:
+    """Delete a track from the Ableton session.
+
+    Parameters:
+    - track_index: Track number (1-based). Use 0 to resolve by name instead.
+    - track_name: Track name (alternative to track_index). If both are given, track_index takes priority.
+    """
+    try:
+        ableton = get_ableton_connection()
+
+        # Resolve by name if no index given
+        if track_index <= 0:
+            if not track_name:
+                return "Error: provide either track_index (1-based) or track_name."
+            info = ableton.send_command("get_session_info")
+            track_count = info.get("track_count", 0)
+            matched_index = None
+            for i in range(track_count):
+                t = ableton.send_command("get_track_info", {"track_index": i})
+                if t.get("name", "").lower() == track_name.lower():
+                    matched_index = i
+                    break
+            if matched_index is None:
+                return f"Error: No track named '{track_name}' found."
+            ti = matched_index
+        else:
+            ti = track_index - 1  # convert to 0-based
+
+        result = ableton.send_command("delete_track", {"track_index": ti})
+        return "Deleted track '{0}'. {1} tracks remaining.".format(
+            result.get("deleted_track", "unknown"),
+            result.get("remaining_tracks", "?"),
+        )
+    except Exception as e:
+        logger.error(f"Error deleting track: {str(e)}")
+        return f"Error deleting track: {str(e)}"
 
 
 @mcp.tool()

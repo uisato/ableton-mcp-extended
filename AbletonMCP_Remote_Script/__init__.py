@@ -239,7 +239,9 @@ class AbletonMCP(ControlSurface):
                                  "manage_clip_automation",
                                  "add_notes_to_arrangement_clip",
                                  "set_device_parameter", "set_device_enabled",
-                                 "delete_device", "navigate_preset"]:
+                                 "delete_device", "navigate_preset",
+                                 "delete_track",
+                                 "set_track_volume", "set_track_panning"]:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
@@ -374,6 +376,17 @@ class AbletonMCP(ControlSurface):
                             ti = params.get("track_index", 0)
                             di = params.get("device_index", 0)
                             result = self._delete_device(ti, di)
+                        elif command_type == "delete_track":
+                            ti = params.get("track_index", 0)
+                            result = self._delete_track(ti)
+                        elif command_type == "set_track_volume":
+                            ti = params.get("track_index", 0)
+                            volume = params.get("volume", 0.85)
+                            result = self._set_track_volume(ti, volume)
+                        elif command_type == "set_track_panning":
+                            ti = params.get("track_index", 0)
+                            panning = params.get("panning", 0.0)
+                            result = self._set_track_panning(ti, panning)
                         elif command_type == "navigate_preset":
                             ti = params.get("track_index", 0)
                             di = params.get("device_index", 0)
@@ -406,6 +419,9 @@ class AbletonMCP(ControlSurface):
                 except queue.Empty:
                     response["status"] = "error"
                     response["message"] = "Timeout waiting for operation to complete"
+            elif command_type == "get_track_volume":
+                ti = params.get("track_index", 0)
+                response["result"] = self._get_track_volume(ti)
             elif command_type == "get_browser_item":
                 uri = params.get("uri", None)
                 path = params.get("path", None)
@@ -652,7 +668,79 @@ class AbletonMCP(ControlSurface):
         except Exception as e:
             self.log_message("Error setting track name: " + str(e))
             raise
-    
+
+    def _get_track_volume(self, track_index):
+        """Get current volume and panning for a track's mixer fader."""
+        try:
+            all_tracks = list(self._song.tracks) + list(self._song.return_tracks)
+            if track_index < 0 or track_index >= len(all_tracks):
+                raise IndexError("Track index {0} out of range (0-{1})".format(
+                    track_index, len(all_tracks) - 1))
+            track = all_tracks[track_index]
+            vol_param = track.mixer_device.volume
+            pan_param = track.mixer_device.panning
+            return {
+                "track_name": track.name,
+                "volume": vol_param.value,
+                "volume_min": vol_param.min,
+                "volume_max": vol_param.max,
+                "panning": pan_param.value,
+                "panning_min": pan_param.min,
+                "panning_max": pan_param.max,
+            }
+        except Exception as e:
+            self.log_message("Error getting track volume: " + str(e))
+            raise
+
+    def _set_track_volume(self, track_index, volume):
+        """Set the mixer fader volume for a track.
+        
+        Args:
+            track_index: 0-based track index (includes return tracks after session tracks)
+            volume: normalized 0.0 (silence) to 1.0 (max). 0.85 = 0dB unity gain.
+        """
+        try:
+            all_tracks = list(self._song.tracks) + list(self._song.return_tracks)
+            if track_index < 0 or track_index >= len(all_tracks):
+                raise IndexError("Track index {0} out of range (0-{1})".format(
+                    track_index, len(all_tracks) - 1))
+            track = all_tracks[track_index]
+            vol_param = track.mixer_device.volume
+            # Clamp to valid range
+            clamped = max(vol_param.min, min(vol_param.max, float(volume)))
+            vol_param.value = clamped
+            return {
+                "track_name": track.name,
+                "volume": vol_param.value,
+            }
+        except Exception as e:
+            self.log_message("Error setting track volume: " + str(e))
+            raise
+
+    def _set_track_panning(self, track_index, panning):
+        """Set the mixer panning for a track.
+        
+        Args:
+            track_index: 0-based track index
+            panning: -1.0 (full left) to +1.0 (full right), 0.0 = center
+        """
+        try:
+            all_tracks = list(self._song.tracks) + list(self._song.return_tracks)
+            if track_index < 0 or track_index >= len(all_tracks):
+                raise IndexError("Track index {0} out of range (0-{1})".format(
+                    track_index, len(all_tracks) - 1))
+            track = all_tracks[track_index]
+            pan_param = track.mixer_device.panning
+            clamped = max(pan_param.min, min(pan_param.max, float(panning)))
+            pan_param.value = clamped
+            return {
+                "track_name": track.name,
+                "panning": pan_param.value,
+            }
+        except Exception as e:
+            self.log_message("Error setting track panning: " + str(e))
+            raise
+
     def _create_clip(self, track_index, clip_index, length):
         """Create a new MIDI clip in the specified track and clip slot"""
         try:
@@ -1566,6 +1654,22 @@ class AbletonMCP(ControlSurface):
             }
         except Exception as e:
             self.log_message("Error deleting device: " + str(e))
+            raise
+
+    def _delete_track(self, track_index):
+        """Delete a track from the session."""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index {0} out of range (0-{1})".format(
+                    track_index, len(self._song.tracks) - 1))
+            track_name = self._song.tracks[track_index].name
+            self._song.delete_track(track_index)
+            return {
+                "deleted_track": track_name,
+                "remaining_tracks": len(self._song.tracks),
+            }
+        except Exception as e:
+            self.log_message("Error deleting track: " + str(e))
             raise
 
     def _navigate_preset(self, track_index, device_index, chain_index=None, direction="current"):
