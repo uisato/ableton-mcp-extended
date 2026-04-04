@@ -26,10 +26,11 @@ from MCP_Server.server import (
 
 
 class TestGetDeviceParameters:
-    """T011: Test get_device_parameters tool."""
+    """Test get_device_parameters tool."""
 
     @patch('MCP_Server.server.get_ableton_connection')
     def test_sends_correct_command(self, mock_conn):
+        # Track 1 → 0, device 2 → 1; verify the RS receives 0-based indices
         mock_ableton = MagicMock()
         mock_ableton.send_command.return_value = {
             "device_name": "Wavetable",
@@ -58,6 +59,7 @@ class TestGetDeviceParameters:
 
     @patch('MCP_Server.server.get_ableton_connection')
     def test_detail_mode_show_all(self, mock_conn):
+        # With show_all=True, the result should list individual parameter names and values
         mock_ableton = MagicMock()
         mock_ableton.send_command.return_value = {
             "device_name": "Serum",
@@ -77,6 +79,7 @@ class TestGetDeviceParameters:
 
     @patch('MCP_Server.server.get_ableton_connection')
     def test_chain_index_converted(self, mock_conn):
+        # Chain index 2 (1-based) should convert to 1 (0-based) before sending
         mock_ableton = MagicMock()
         mock_ableton.send_command.return_value = {
             "device_name": "Test", "device_class": "Test",
@@ -90,10 +93,11 @@ class TestGetDeviceParameters:
 
 
 class TestSetDeviceParameter:
-    """T015: Test set_device_parameter tool."""
+    """Test set_device_parameter tool."""
 
     @patch('MCP_Server.server.get_ableton_connection')
     def test_sends_correct_command_by_name(self, mock_conn):
+        # Setting a parameter by name should resolve the name and send the correct value
         mock_ableton = MagicMock()
         # First call: get_device_parameters for alias resolution
         mock_ableton.send_command.side_effect = [
@@ -110,6 +114,7 @@ class TestSetDeviceParameter:
 
     @patch('MCP_Server.server.get_ableton_connection')
     def test_sends_by_index(self, mock_conn):
+        # Setting a parameter by index should bypass alias resolution
         mock_ableton = MagicMock()
         mock_ableton.send_command.return_value = {
             "parameter_name": "Volume", "old_value": 0.5,
@@ -122,6 +127,7 @@ class TestSetDeviceParameter:
 
     @patch('MCP_Server.server.get_ableton_connection')
     def test_clamp_warning(self, mock_conn):
+        # When the RS clamps a value, the result should mention it was clamped
         mock_ableton = MagicMock()
         mock_ableton.send_command.side_effect = [
             {"device_name": "Test", "parameters": []},
@@ -136,6 +142,7 @@ class TestSetDeviceParameter:
 
     @patch('MCP_Server.server.get_ableton_connection')
     def test_alias_resolution(self, mock_conn):
+        # A friendly alias like "wavetable position" should resolve to the real param name
         mock_ableton = MagicMock()
         mock_ableton.send_command.side_effect = [
             {"device_name": "Serum", "parameters": []},
@@ -153,10 +160,11 @@ class TestSetDeviceParameter:
 
 
 class TestEnableDisableDevice:
-    """T020: Test enable_device and disable_device tools."""
+    """Test enable_device and disable_device tools."""
 
     @patch('MCP_Server.server.get_ableton_connection')
     def test_enable_by_index(self, mock_conn):
+        # Enabling device 2 on track 1 should send enabled=True with 0-based indices
         mock_ableton = MagicMock()
         mock_ableton.send_command.return_value = {
             "device_name": "Compressor", "is_active": True,
@@ -171,6 +179,7 @@ class TestEnableDisableDevice:
 
     @patch('MCP_Server.server.get_ableton_connection')
     def test_disable_by_index(self, mock_conn):
+        # Disabling device 1 on track 1 should send enabled=False
         mock_ableton = MagicMock()
         mock_ableton.send_command.return_value = {
             "device_name": "EQ Eight", "is_active": False,
@@ -184,6 +193,7 @@ class TestEnableDisableDevice:
 
     @patch('MCP_Server.server.get_ableton_connection')
     def test_by_name_resolves(self, mock_conn):
+        # When device_name is given instead of device_index, resolve to the correct 0-based index
         mock_ableton = MagicMock()
         mock_ableton.send_command.side_effect = [
             {"devices": [{"index": 0, "name": "Compressor"}, {"index": 1, "name": "EQ Eight"}]},
@@ -197,6 +207,7 @@ class TestEnableDisableDevice:
 
     @patch('MCP_Server.server.get_ableton_connection')
     def test_ambiguous_name_error(self, mock_conn):
+        # Multiple devices with the same name should produce an error instead of guessing
         mock_ableton = MagicMock()
         mock_ableton.send_command.return_value = {
             "devices": [{"index": 0, "name": "EQ Eight"}, {"index": 1, "name": "EQ Eight"}],
@@ -208,10 +219,11 @@ class TestEnableDisableDevice:
 
 
 class TestGetChainInfo:
-    """T026: Test get_chain_info and get_drum_pad_info."""
+    """Test get_chain_info and get_drum_pad_info."""
 
     @patch('MCP_Server.server.get_ableton_connection')
     def test_list_chains(self, mock_conn):
+        # Listing chains should show chain count, names, and devices inside each chain
         mock_ableton = MagicMock()
         mock_ableton.send_command.return_value = {
             "device_name": "Instrument Rack",
@@ -232,6 +244,7 @@ class TestGetChainInfo:
 
     @patch('MCP_Server.server.get_ableton_connection')
     def test_not_a_rack_error(self, mock_conn):
+        # Requesting chain info on a non-rack device should return an error message
         mock_ableton = MagicMock()
         mock_ableton.send_command.side_effect = Exception("Device 'Serum' is not a rack")
         mock_conn.return_value = mock_ableton
@@ -241,6 +254,7 @@ class TestGetChainInfo:
 
     @patch('MCP_Server.server.get_ableton_connection')
     def test_drum_pad_info(self, mock_conn):
+        # Drum pad info should list filled pads with their note numbers, names, and devices
         mock_ableton = MagicMock()
         mock_ableton.send_command.return_value = {
             "device_name": "Drum Rack",
@@ -258,10 +272,11 @@ class TestGetChainInfo:
 
 
 class TestDeleteDevice:
-    """T030: Test delete_device tool."""
+    """Test delete_device tool."""
 
     @patch('MCP_Server.server.get_ableton_connection')
     def test_delete_by_index(self, mock_conn):
+        # Track 1 → 0, device 2 → 1; verify the correct 0-based indices are sent
         mock_ableton = MagicMock()
         mock_ableton.send_command.return_value = {
             "deleted_device": "Compressor", "remaining_devices": 1,
@@ -277,6 +292,7 @@ class TestDeleteDevice:
 
     @patch('MCP_Server.server.get_ableton_connection')
     def test_delete_by_name(self, mock_conn):
+        # When deleting by name, resolve the device name to its 0-based index first
         mock_ableton = MagicMock()
         mock_ableton.send_command.side_effect = [
             {"devices": [{"index": 0, "name": "EQ Eight"}, {"index": 1, "name": "Limiter"}]},
@@ -290,10 +306,11 @@ class TestDeleteDevice:
 
 
 class TestNavigateDevicePreset:
-    """T034: Test navigate_device_preset tool."""
+    """Test navigate_device_preset tool."""
 
     @patch('MCP_Server.server.get_ableton_connection')
     def test_next_preset(self, mock_conn):
+        # Navigating to next preset should send 0-based indices and direction="next"
         mock_ableton = MagicMock()
         mock_ableton.send_command.return_value = {
             "device_name": "Serum", "preset_name": "Warm Pad",
@@ -310,6 +327,7 @@ class TestNavigateDevicePreset:
 
     @patch('MCP_Server.server.get_ableton_connection')
     def test_current_preset(self, mock_conn):
+        # Direction "current" should report the active preset without changing it
         mock_ableton = MagicMock()
         mock_ableton.send_command.return_value = {
             "device_name": "Serum", "preset_name": "Init",
@@ -323,6 +341,7 @@ class TestNavigateDevicePreset:
 
     @patch('MCP_Server.server.get_ableton_connection')
     def test_no_presets_error(self, mock_conn):
+        # When a device has no presets, the error should be reported gracefully
         mock_ableton = MagicMock()
         mock_ableton.send_command.side_effect = Exception("Device has no presets")
         mock_conn.return_value = mock_ableton

@@ -201,6 +201,40 @@ mcp = FastMCP(
     lifespan=server_lifespan
 )
 
+# ── Index conversion helpers ─────────────────────────────────────
+#
+# Convention: every MCP tool exposes **1-based** indices to callers.
+# The Remote Script expects **0-based** indices.  These helpers
+# enforce the rule in one place so individual tools stay simple.
+
+
+def _to_zero_based(index: int, field_name: str = "index") -> int:
+    """Convert a required 1-based MCP index to 0-based for the Remote Script.
+
+    Raises ValueError when the caller passes 0 or a negative value.
+    """
+    if index < 1:
+        raise ValueError(
+            f"{field_name} must be >= 1 (1-based), got {index}"
+        )
+    return index - 1
+
+
+def _optional_to_zero_based(index: int, field_name: str = "index") -> int | None:
+    """Convert an optional 1-based index to 0-based.
+
+    Returns None when *index* is 0 (meaning "not specified").
+    Raises ValueError for negative values.
+    """
+    if index < 0:
+        raise ValueError(
+            f"{field_name} must be >= 0 (0 = unset, 1+ = 1-based), got {index}"
+        )
+    if index == 0:
+        return None
+    return index - 1
+
+
 # Parameter normalization utilities
 
 
@@ -342,13 +376,14 @@ def get_session_info(ctx: Context) -> str:
 def get_track_info(ctx: Context, track_index: int) -> str:
     """
     Get detailed information about a specific track in Ableton.
-    
+
     Parameters:
-    - track_index: The index of the track to get information about
+    - track_index: Track number (1-based).
     """
     try:
         ableton = get_ableton_connection()
-        result = ableton.send_command("get_track_info", {"track_index": track_index})
+        ti = _to_zero_based(track_index, "track_index")
+        result = ableton.send_command("get_track_info", {"track_index": ti})
         return json.dumps(result, indent=2)
     except Exception as e:
         logger.error(f"Error getting track info from Ableton: {str(e)}")
@@ -375,14 +410,15 @@ def create_midi_track(ctx: Context, index: int = -1) -> str:
 def set_track_name(ctx: Context, track_index: int, name: str) -> str:
     """
     Set the name of a track.
-    
+
     Parameters:
-    - track_index: The index of the track to rename
-    - name: The new name for the track
+    - track_index: Track number (1-based).
+    - name: The new name for the track.
     """
     try:
         ableton = get_ableton_connection()
-        result = ableton.send_command("set_track_name", {"track_index": track_index, "name": name})
+        ti = _to_zero_based(track_index, "track_index")
+        result = ableton.send_command("set_track_name", {"track_index": ti, "name": name})
         return f"Renamed track to: {result.get('name', name)}"
     except Exception as e:
         logger.error(f"Error setting track name: {str(e)}")
@@ -402,7 +438,8 @@ def get_track_volume(ctx: Context, track_index: int) -> str:
     """
     try:
         ableton = get_ableton_connection()
-        result = ableton.send_command("get_track_volume", {"track_index": track_index - 1})
+        ti = _to_zero_based(track_index, "track_index")
+        result = ableton.send_command("get_track_volume", {"track_index": ti})
         vol = result.get("volume", 0)
         pan = result.get("panning", 0)
         name = result.get("track_name", "?")
@@ -445,8 +482,9 @@ def set_track_volume(ctx: Context, track_index: int, volume: float) -> str:
     """
     try:
         ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
         result = ableton.send_command("set_track_volume", {
-            "track_index": track_index - 1,
+            "track_index": ti,
             "volume": volume,
         })
         name = result.get("track_name", "?")
@@ -470,8 +508,9 @@ def set_track_panning(ctx: Context, track_index: int, panning: float) -> str:
     """
     try:
         ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
         result = ableton.send_command("set_track_panning", {
-            "track_index": track_index - 1,
+            "track_index": ti,
             "panning": panning,
         })
         name = result.get("track_name", "?")
@@ -487,17 +526,19 @@ def set_track_panning(ctx: Context, track_index: int, panning: float) -> str:
 def create_clip(ctx: Context, track_index: int, clip_index: int, length: float = 4.0) -> str:
     """
     Create a new MIDI clip in the specified track and clip slot.
-    
+
     Parameters:
-    - track_index: The index of the track to create the clip in
-    - clip_index: The index of the clip slot to create the clip in
-    - length: The length of the clip in beats (default: 4.0)
+    - track_index: Track number (1-based).
+    - clip_index: Clip slot number (1-based).
+    - length: The length of the clip in beats (default: 4.0).
     """
     try:
         ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        ci = _to_zero_based(clip_index, "clip_index")
         result = ableton.send_command("create_clip", {
-            "track_index": track_index, 
-            "clip_index": clip_index, 
+            "track_index": ti,
+            "clip_index": ci,
             "length": length
         })
         return f"Created new clip at track {track_index}, slot {clip_index} with length {length} beats"
@@ -507,24 +548,26 @@ def create_clip(ctx: Context, track_index: int, clip_index: int, length: float =
 
 @mcp.tool()
 def add_notes_to_clip(
-    ctx: Context, 
-    track_index: int, 
-    clip_index: int, 
+    ctx: Context,
+    track_index: int,
+    clip_index: int,
     notes: List[Dict[str, Union[int, float, bool]]]
 ) -> str:
     """
     Add MIDI notes to a clip.
-    
+
     Parameters:
-    - track_index: The index of the track containing the clip
-    - clip_index: The index of the clip slot containing the clip
-    - notes: List of note dictionaries, each with pitch, start_time, duration, velocity, and mute
+    - track_index: Track number (1-based).
+    - clip_index: Clip slot number (1-based).
+    - notes: List of note dictionaries, each with pitch, start_time, duration, velocity, and mute.
     """
     try:
         ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        ci = _to_zero_based(clip_index, "clip_index")
         result = ableton.send_command("add_notes_to_clip", {
-            "track_index": track_index,
-            "clip_index": clip_index,
+            "track_index": ti,
+            "clip_index": ci,
             "notes": notes
         })
         return f"Added {len(notes)} notes to clip at track {track_index}, slot {clip_index}"
@@ -536,17 +579,19 @@ def add_notes_to_clip(
 def set_clip_name(ctx: Context, track_index: int, clip_index: int, name: str) -> str:
     """
     Set the name of a clip.
-    
+
     Parameters:
-    - track_index: The index of the track containing the clip
-    - clip_index: The index of the clip slot containing the clip
-    - name: The new name for the clip
+    - track_index: Track number (1-based).
+    - clip_index: Clip slot number (1-based).
+    - name: The new name for the clip.
     """
     try:
         ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        ci = _to_zero_based(clip_index, "clip_index")
         result = ableton.send_command("set_clip_name", {
-            "track_index": track_index,
-            "clip_index": clip_index,
+            "track_index": ti,
+            "clip_index": ci,
             "name": name
         })
         return f"Renamed clip at track {track_index}, slot {clip_index} to '{name}'"
@@ -575,15 +620,16 @@ def set_tempo(ctx: Context, tempo: float) -> str:
 def load_instrument_or_effect(ctx: Context, track_index: int, uri: str) -> str:
     """
     Load an instrument or effect onto a track using its URI.
-    
+
     Parameters:
-    - track_index: The index of the track to load the instrument on
-    - uri: The URI of the instrument or effect to load (e.g., 'query:Synths#Instrument%20Rack:Bass:FileId_5116')
+    - track_index: Track number (1-based).
+    - uri: The URI of the instrument or effect to load (e.g., 'query:Synths#Instrument%20Rack:Bass:FileId_5116').
     """
     try:
         ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
         result = ableton.send_command("load_browser_item", {
-            "track_index": track_index,
+            "track_index": ti,
             "item_uri": uri
         })
         
@@ -605,16 +651,18 @@ def load_instrument_or_effect(ctx: Context, track_index: int, uri: str) -> str:
 def fire_clip(ctx: Context, track_index: int, clip_index: int) -> str:
     """
     Start playing a clip.
-    
+
     Parameters:
-    - track_index: The index of the track containing the clip
-    - clip_index: The index of the clip slot containing the clip
+    - track_index: Track number (1-based).
+    - clip_index: Clip slot number (1-based).
     """
     try:
         ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        ci = _to_zero_based(clip_index, "clip_index")
         result = ableton.send_command("fire_clip", {
-            "track_index": track_index,
-            "clip_index": clip_index
+            "track_index": ti,
+            "clip_index": ci
         })
         return f"Started playing clip at track {track_index}, slot {clip_index}"
     except Exception as e:
@@ -625,16 +673,18 @@ def fire_clip(ctx: Context, track_index: int, clip_index: int) -> str:
 def stop_clip(ctx: Context, track_index: int, clip_index: int) -> str:
     """
     Stop playing a clip.
-    
+
     Parameters:
-    - track_index: The index of the track containing the clip
-    - clip_index: The index of the clip slot containing the clip
+    - track_index: Track number (1-based).
+    - clip_index: Clip slot number (1-based).
     """
     try:
         ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        ci = _to_zero_based(clip_index, "clip_index")
         result = ableton.send_command("stop_clip", {
-            "track_index": track_index,
-            "clip_index": clip_index
+            "track_index": ti,
+            "clip_index": ci
         })
         return f"Stopped clip at track {track_index}, slot {clip_index}"
     except Exception as e:
@@ -771,18 +821,19 @@ def get_browser_items_at_path(ctx: Context, path: str) -> str:
 def load_drum_kit(ctx: Context, track_index: int, rack_uri: str, kit_path: str) -> str:
     """
     Load a drum rack and then load a specific drum kit into it.
-    
+
     Parameters:
-    - track_index: The index of the track to load on
-    - rack_uri: The URI of the drum rack to load (e.g., 'Drums/Drum Rack')
-    - kit_path: Path to the drum kit inside the browser (e.g., 'drums/acoustic/kit1')
+    - track_index: Track number (1-based).
+    - rack_uri: The URI of the drum rack to load (e.g., 'Drums/Drum Rack').
+    - kit_path: Path to the drum kit inside the browser (e.g., 'drums/acoustic/kit1').
     """
     try:
         ableton = get_ableton_connection()
-        
+        ti = _to_zero_based(track_index, "track_index")
+
         # Step 1: Load the drum rack
         result = ableton.send_command("load_browser_item", {
-            "track_index": track_index,
+            "track_index": ti,
             "item_uri": rack_uri
         })
         
@@ -807,7 +858,7 @@ def load_drum_kit(ctx: Context, track_index: int, rack_uri: str, kit_path: str) 
         # Step 4: Load the first loadable kit
         kit_uri = loadable_kits[0].get("uri")
         load_result = ableton.send_command("load_browser_item", {
-            "track_index": track_index,
+            "track_index": ti,
             "item_uri": kit_uri
         })
         
@@ -845,8 +896,8 @@ def get_arrangement_info(ctx: Context, track_index: int = 0) -> str:
     """
     try:
         ableton = get_ableton_connection()
-        idx = track_index - 1 if track_index > 0 else -1
-        result = ableton.send_command("get_arrangement_info", {"track_index": idx})
+        idx = _optional_to_zero_based(track_index, "track_index")
+        result = ableton.send_command("get_arrangement_info", {"track_index": idx if idx is not None else -1})
 
         num = result.get("transport", {}).get("signature_numerator", 4)
         denom = result.get("transport", {}).get("signature_denominator", 4)
@@ -1067,8 +1118,9 @@ def create_arrangement_midi_clip(
             position = start_beat
             length = length_beats
 
+        ti = _to_zero_based(track_index, "track_index")
         result = ableton.send_command("create_arrangement_clip", {
-            "track_index": track_index - 1,
+            "track_index": ti,
             "position": position,
             "length": length,
         })
@@ -1107,8 +1159,9 @@ def create_arrangement_audio_clip(
         ableton = get_ableton_connection()
         position = _convert_bar_to_beat(start_bar, start_beat)
 
+        ti = _to_zero_based(track_index, "track_index")
         result = ableton.send_command("create_arrangement_audio_clip", {
-            "track_index": track_index - 1,
+            "track_index": ti,
             "position": position,
             "file_path": file_path,
         })
@@ -1138,9 +1191,11 @@ def duplicate_clip_to_arrangement(
         ableton = get_ableton_connection()
         dest = _convert_bar_to_beat(destination_bar, destination_beat)
 
+        ti = _to_zero_based(track_index, "track_index")
+        ci = _to_zero_based(clip_index, "clip_index")
         result = ableton.send_command("duplicate_to_arrangement", {
-            "track_index": track_index - 1,
-            "clip_index": clip_index - 1,
+            "track_index": ti,
+            "clip_index": ci,
             "destination_time": dest,
         })
         return f"Duplicated session clip to arrangement on track {track_index}" + _ARRANGEMENT_TIP
@@ -1165,11 +1220,12 @@ def delete_arrangement_clip(
     """
     try:
         ableton = get_ableton_connection()
-        params = {"track_index": track_index - 1}
+        ti = _to_zero_based(track_index, "track_index")
+        params = {"track_index": ti}
         if clip_name:
             params["clip_name"] = clip_name
         elif clip_index > 0:
-            params["clip_index"] = clip_index - 1
+            params["clip_index"] = _to_zero_based(clip_index, "clip_index")
         else:
             return "Error: provide clip_index or clip_name"
 
@@ -1219,8 +1275,8 @@ def set_arrangement_clip_property(
     """
     try:
         ableton = get_ableton_connection()
-        ci = clip_index - 1 if clip_index > 0 else 0
-        ti = track_index - 1
+        ti = _to_zero_based(track_index, "track_index")
+        ci = _to_zero_based(clip_index, "clip_index") if clip_index > 0 else 0
 
         props = {
             "name": name, "muted": muted, "color": color, "looping": looping,
@@ -1278,10 +1334,10 @@ def control_arrangement_view(ctx: Context, action: str, track_index: int = 0) ->
     """
     try:
         ableton = get_ableton_connection()
-        ti = track_index - 1 if track_index > 0 else 0
+        ti = _optional_to_zero_based(track_index, "track_index")
         result = ableton.send_command("control_arrangement_view", {
             "action": action,
-            "track_index": ti,
+            "track_index": ti if ti is not None else 0,
         })
         return f"Arrangement view: {action} done"
     except Exception as e:
@@ -1309,9 +1365,11 @@ def manage_clip_automation(
     """
     try:
         ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        ci = _to_zero_based(clip_index, "clip_index") if clip_index > 0 else 0
         result = ableton.send_command("manage_clip_automation", {
-            "track_index": track_index - 1,
-            "clip_index": clip_index - 1 if clip_index > 0 else 0,
+            "track_index": ti,
+            "clip_index": ci,
             "action": action,
             "parameter_name": parameter_name,
         })
@@ -1351,10 +1409,12 @@ def get_device_parameters(
         from MCP_Server.plugin_aliases import get_categories, get_alias_for_param
 
         ableton = get_ableton_connection()
-        ci = chain_index - 1 if chain_index > 0 else None
+        ti = _to_zero_based(track_index, "track_index")
+        di = _to_zero_based(device_index, "device_index")
+        ci = _optional_to_zero_based(chain_index, "chain_index")
         result = ableton.send_command("get_device_parameters", {
-            "track_index": track_index - 1,
-            "device_index": device_index - 1,
+            "track_index": ti,
+            "device_index": di,
             "chain_index": ci,
             "show_all": True,  # Always get full list from RS, group MCP-side
         })
@@ -1439,16 +1499,19 @@ def set_device_parameter(
         from MCP_Server.plugin_aliases import resolve_alias
 
         ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        di = _to_zero_based(device_index, "device_index")
+        ci = _optional_to_zero_based(chain_index, "chain_index")
+        pi = _optional_to_zero_based(parameter_index, "parameter_index")
 
         # Resolve alias if parameter_name is provided
         resolved_name = parameter_name
         alias_used = None
         if parameter_name:
             # First get device name for alias resolution
-            ci = chain_index - 1 if chain_index > 0 else None
             info = ableton.send_command("get_device_parameters", {
-                "track_index": track_index - 1,
-                "device_index": device_index - 1,
+                "track_index": ti,
+                "device_index": di,
                 "chain_index": ci,
                 "show_all": False,
             })
@@ -1459,11 +1522,11 @@ def set_device_parameter(
                 resolved_name = real_name
 
         result = ableton.send_command("set_device_parameter", {
-            "track_index": track_index - 1,
-            "device_index": device_index - 1,
-            "chain_index": chain_index - 1 if chain_index > 0 else None,
+            "track_index": ti,
+            "device_index": di,
+            "chain_index": ci,
             "parameter_name": resolved_name if resolved_name else None,
-            "parameter_index": parameter_index - 1 if parameter_index > 0 else None,
+            "parameter_index": pi,
             "value": value,
         })
 
@@ -1525,12 +1588,13 @@ def _toggle_device(track_index, device_index, device_name, chain_index, enabled)
     """Shared logic for enable/disable device."""
     try:
         ableton = get_ableton_connection()
-
-        di = device_index - 1 if device_index > 0 else 0
+        ti = _to_zero_based(track_index, "track_index")
+        di = _optional_to_zero_based(device_index, "device_index")
+        ci = _optional_to_zero_based(chain_index, "chain_index")
 
         # If device_name provided, resolve to index
-        if device_name and device_index <= 0:
-            info = ableton.send_command("get_track_info", {"track_index": track_index - 1})
+        if device_name and di is None:
+            info = ableton.send_command("get_track_info", {"track_index": ti})
             devices = info.get("devices", [])
             matches = [d for d in devices if d["name"].lower() == device_name.lower()]
             if len(matches) == 0:
@@ -1540,11 +1604,13 @@ def _toggle_device(track_index, device_index, device_name, chain_index, enabled)
                 return "Error: Multiple devices named '{0}' on track {1}: {2}".format(
                     device_name, track_index, match_list)
             di = matches[0]["index"]
+        elif di is None:
+            di = 0
 
         result = ableton.send_command("set_device_enabled", {
-            "track_index": track_index - 1,
+            "track_index": ti,
             "device_index": di,
-            "chain_index": chain_index - 1 if chain_index > 0 else None,
+            "chain_index": ci,
             "enabled": enabled,
         })
 
@@ -1572,10 +1638,13 @@ def get_chain_info(
     """
     try:
         ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        di = _to_zero_based(device_index, "device_index")
+        ci = _optional_to_zero_based(chain_index, "chain_index")
         result = ableton.send_command("get_chain_info", {
-            "track_index": track_index - 1,
-            "device_index": device_index - 1,
-            "chain_index": chain_index - 1 if chain_index > 0 else None,
+            "track_index": ti,
+            "device_index": di,
+            "chain_index": ci,
         })
 
         if chain_index > 0:
@@ -1617,9 +1686,11 @@ def get_drum_pad_info(ctx: Context, track_index: int, device_index: int = 1) -> 
     """
     try:
         ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        di = _to_zero_based(device_index, "device_index")
         result = ableton.send_command("get_drum_pad_info", {
-            "track_index": track_index - 1,
-            "device_index": device_index - 1,
+            "track_index": ti,
+            "device_index": di,
         })
 
         device_name = result.get("device_name", "?")
@@ -1657,12 +1728,12 @@ def delete_device(
     """
     try:
         ableton = get_ableton_connection()
-
-        di = device_index - 1 if device_index > 0 else 0
+        ti = _to_zero_based(track_index, "track_index")
+        di = _optional_to_zero_based(device_index, "device_index")
 
         # Resolve by name if needed
-        if device_name and device_index <= 0:
-            info = ableton.send_command("get_track_info", {"track_index": track_index - 1})
+        if device_name and di is None:
+            info = ableton.send_command("get_track_info", {"track_index": ti})
             devices = info.get("devices", [])
             matches = [d for d in devices if d["name"].lower() == device_name.lower()]
             if len(matches) == 0:
@@ -1671,9 +1742,11 @@ def delete_device(
                 match_list = ", ".join("{0} (index {1})".format(d["name"], d["index"] + 1) for d in matches)
                 return "Error: Multiple devices named '{0}': {1}".format(device_name, match_list)
             di = matches[0]["index"]
+        elif di is None:
+            di = 0
 
         result = ableton.send_command("delete_device", {
-            "track_index": track_index - 1,
+            "track_index": ti,
             "device_index": di,
         })
 
@@ -1716,7 +1789,7 @@ def delete_track(
                 return f"Error: No track named '{track_name}' found."
             ti = matched_index
         else:
-            ti = track_index - 1  # convert to 0-based
+            ti = _to_zero_based(track_index, "track_index")
 
         result = ableton.send_command("delete_track", {"track_index": ti})
         return "Deleted track '{0}'. {1} tracks remaining.".format(
@@ -1746,10 +1819,13 @@ def navigate_device_preset(
     """
     try:
         ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        di = _to_zero_based(device_index, "device_index")
+        ci = _optional_to_zero_based(chain_index, "chain_index")
         result = ableton.send_command("navigate_preset", {
-            "track_index": track_index - 1,
-            "device_index": device_index - 1,
-            "chain_index": chain_index - 1 if chain_index > 0 else None,
+            "track_index": ti,
+            "device_index": di,
+            "chain_index": ci,
             "direction": direction,
         })
 
