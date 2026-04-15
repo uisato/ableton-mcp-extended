@@ -3,6 +3,9 @@ from mcp.server.fastmcp import FastMCP, Context
 import socket
 import json
 import logging
+import re
+import threading
+import time
 from dataclasses import dataclass
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Dict, Any, List, Union
@@ -192,6 +195,7 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
             logger.info("Disconnecting from Ableton on shutdown")
             _ableton_connection.disconnect()
             _ableton_connection = None
+        _invalidate_external_plugin_cache()
         logger.info("AbletonMCP server shut down")
 
 # Create the MCP server with lifespan support
@@ -295,6 +299,19 @@ def beat_to_bar(beat: float, numerator: int = 4, denominator: int = 4) -> int:
 
 # Global connection for resources
 _ableton_connection = None
+_EXTERNAL_PLUGIN_CACHE_TTL_SECONDS = 120.0
+_external_plugin_cache_lock = threading.Lock()
+_external_plugin_cache: Dict[str, Any] = {
+    "plugins": None,
+    "built_at": 0.0,
+}
+
+
+def _invalidate_external_plugin_cache() -> None:
+    """Invalidate cached external plugin discovery results."""
+    with _external_plugin_cache_lock:
+        _external_plugin_cache["plugins"] = None
+        _external_plugin_cache["built_at"] = 0.0
 
 def get_ableton_connection():
     """Get or create a persistent Ableton connection"""
@@ -315,6 +332,7 @@ def get_ableton_connection():
             except:
                 pass
             _ableton_connection = None
+            _invalidate_external_plugin_cache()
     
     # Connection doesn't exist or is invalid, create a new one
     if _ableton_connection is None:
@@ -337,6 +355,7 @@ def get_ableton_connection():
                         logger.error(f"Connection validation failed: {str(e)}")
                         _ableton_connection.disconnect()
                         _ableton_connection = None
+                        _invalidate_external_plugin_cache()
                         # Continue to next attempt
                 else:
                     _ableton_connection = None
@@ -345,6 +364,7 @@ def get_ableton_connection():
                 if _ableton_connection:
                     _ableton_connection.disconnect()
                     _ableton_connection = None
+                    _invalidate_external_plugin_cache()
             
             # Wait before trying again, but only if we have more attempts left
             if attempt < max_attempts:
@@ -816,6 +836,274 @@ def get_browser_items_at_path(ctx: Context, path: str) -> str:
         else:
             logger.error(f"Error getting browser items at path: {error_msg}")
             return f"Error getting browser items at path: {error_msg}"
+
+
+def _normalize_plugin_search_text(value: str) -> str:
+    """Normalize plugin names/queries for tolerant matching."""
+    if not value:
+        return ""
+    cleaned = re.sub(r"[\s\-_]+", " ", value.strip().lower())
+    return re.sub(r"\s+", " ", cleaned)
+
+
+def _plugin_match_score(plugin_name: str, query: str) -> int:
+    """Compute a rough match score for plugin name search."""
+    normalized_name = _normalize_plugin_search_text(plugin_name)
+    normalized_query = _normalize_plugin_search_text(query)
+
+    if not normalized_query:
+        return 1
+    if normalized_name == normalized_query:
+        return 1000  # exact match
+    if normalized_name.startswith(normalized_query):
+        return 900  # strong prefix match
+
+    query_tokens = [t for t in normalized_query.split(" ") if t]
+    if query_tokens and all(token in normalized_name for token in query_tokens):
+        # token coverage, weighted by total query token length
+        return 700 + sum(len(t) for t in query_tokens)
+
+    if normalized_query in normalized_name:
+        return 600 + len(normalized_query)  # simple substring match
+
+    return 0
+
+
+def _collect_external_plugins_from_root(
+    ableton: AbletonConnection,
+    root_path: str,
+    max_depth: int = 8,
+    max_visited_paths: int = 2000,
+) -> List[Dict[str, Any]]:
+    """Recursively walk a browser root path and collect loadable plugin items."""
+    stack: List[tuple[str, int]] = [(root_path, 0)]
+    visited: set[str] = set()
+    plugins: List[Dict[str, Any]] = []
+
+    while stack:
+        current_path, depth = stack.pop()
+        if current_path in visited:
+            continue
+        visited.add(current_path)
+
+        if len(visited) > max_visited_paths:
+            raise RuntimeError(
+                "Plugin traversal exceeded safety limit ({0} paths).".format(max_visited_paths)
+            )
+
+        result = ableton.send_command("get_browser_items_at_path", {"path": current_path})
+        if "error" in result:
+            # Root errors matter; deeper path misses are expected from stale paths.
+            if depth == 0:
+                raise ValueError(result.get("error", "Unknown browser root error"))
+            continue
+
+        items = result.get("items", [])
+        for item in items:
+            name = (item.get("name") or "").strip()
+            if not name:
+                continue
+
+            child_path = "{0}/{1}".format(current_path, name)
+            is_folder = bool(item.get("is_folder", False))
+            is_loadable = bool(item.get("is_loadable", False))
+            uri = item.get("uri")
+
+            if is_loadable and uri:
+                plugins.append({
+                    "name": name,
+                    "uri": uri,
+                    "path": child_path,
+                    "is_device": bool(item.get("is_device", False)),
+                    "root": root_path,
+                })
+
+            if is_folder and depth < max_depth:
+                stack.append((child_path, depth + 1))
+
+    return plugins
+
+
+def _discover_external_plugins(ableton: AbletonConnection) -> List[Dict[str, Any]]:
+    """Discover loadable external plugins from common browser roots."""
+    # Include aliases to survive differences in browser category naming.
+    candidate_roots = ["plugins", "vst3", "vst2", "au", "plug-ins"]
+    discovered_any_root = False
+    errors: List[str] = []
+
+    for root in candidate_roots:
+        try:
+            found = _collect_external_plugins_from_root(ableton, root_path=root)
+            discovered_any_root = True
+            if not found:
+                continue
+
+            # First successful non-empty root is enough; aliases can point to the same tree
+            # and rescanning them is expensive.
+            found.sort(key=lambda p: _normalize_plugin_search_text(p.get("name", "")))
+            return found
+        except Exception as e:
+            errors.append("{0}: {1}".format(root, str(e)))
+
+    if discovered_any_root:
+        return []
+
+    raise ValueError(
+        "Could not discover external plugins. Tried roots: {0}. Last errors: {1}".format(
+            ", ".join(candidate_roots),
+            " | ".join(errors) if errors else "none",
+        )
+    )
+
+
+def _get_cached_external_plugins(
+    ableton: AbletonConnection,
+    force_refresh: bool = False,
+) -> List[Dict[str, Any]]:
+    """Get external plugins using a short-lived cache to avoid repeated deep scans."""
+    now = time.monotonic()
+    with _external_plugin_cache_lock:
+        cached_plugins = _external_plugin_cache.get("plugins")
+        built_at = float(_external_plugin_cache.get("built_at", 0.0) or 0.0)
+        if (
+            not force_refresh
+            and cached_plugins is not None
+            and (now - built_at) <= _EXTERNAL_PLUGIN_CACHE_TTL_SECONDS
+        ):
+            return list(cached_plugins)
+
+    discovered = _discover_external_plugins(ableton)
+    with _external_plugin_cache_lock:
+        _external_plugin_cache["plugins"] = list(discovered)
+        _external_plugin_cache["built_at"] = time.monotonic()
+    return discovered
+
+
+@mcp.tool()
+def list_external_plugins(
+    ctx: Context,
+    query: str = "",
+    max_results: int = 50,
+    refresh_cache: bool = False,
+) -> str:
+    """List discovered external plugins (VST/AU), optionally filtered by name query.
+
+    Parameters:
+    - query: Optional case-insensitive search string.
+    - max_results: Maximum number of plugins to display.
+    - refresh_cache: If True, force a rescan instead of using cached results.
+    """
+    try:
+        ableton = get_ableton_connection()
+        plugins = _get_cached_external_plugins(ableton, force_refresh=refresh_cache)
+
+        if query:
+            scored = []
+            for plugin in plugins:
+                score = _plugin_match_score(plugin.get("name", ""), query)
+                if score > 0:
+                    scored.append((score, plugin))
+            scored.sort(key=lambda x: (-x[0], _normalize_plugin_search_text(x[1].get("name", ""))))
+            filtered = [item for _, item in scored]
+        else:
+            filtered = plugins
+
+        if not filtered:
+            if query:
+                return "No external plugins matched query '{0}'.".format(query)
+            return "No external plugins were discovered."
+
+        max_results = max(1, int(max_results))
+        shown = filtered[:max_results]
+        lines = [
+            "External plugins discovered: {0} total, showing {1}".format(len(filtered), len(shown)),
+            "",
+        ]
+        for idx, plugin in enumerate(shown, start=1):
+            lines.append(
+                "  {0}. {1} (path: {2})".format(
+                    idx,
+                    plugin.get("name", "Unknown"),
+                    plugin.get("path", "?"),
+                )
+            )
+
+        if len(filtered) > len(shown):
+            lines.append("")
+            lines.append(
+                "Use max_results={0} (or a tighter query) to see more.".format(len(filtered))
+            )
+        return "\n".join(lines)
+    except Exception as e:
+        logger.error(f"Error listing external plugins: {str(e)}")
+        return f"Error listing external plugins: {str(e)}"
+
+
+@mcp.tool()
+def load_external_plugin(
+    ctx: Context,
+    track_index: int,
+    plugin_name: str,
+    exact_match: bool = False,
+    refresh_cache: bool = False,
+) -> str:
+    """Load an external plugin onto a track by plugin name (no URI required).
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - plugin_name: Plugin name to match (e.g., "FabFilter Pro-Q 3").
+    - exact_match: If True, require exact normalized name match.
+    - refresh_cache: If True, force a rescan before matching.
+    """
+    try:
+        if not plugin_name or not plugin_name.strip():
+            return "Error: plugin_name is required."
+
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        plugins = _get_cached_external_plugins(ableton, force_refresh=refresh_cache)
+
+        scored = []
+        for plugin in plugins:
+            score = _plugin_match_score(plugin.get("name", ""), plugin_name)
+            if exact_match and score < 1000:
+                continue
+            if score > 0:
+                scored.append((score, plugin))
+
+        scored.sort(key=lambda x: (-x[0], _normalize_plugin_search_text(x[1].get("name", ""))))
+        if not scored:
+            return (
+                "No external plugin matched '{0}'. Try list_external_plugins(query='{0}') "
+                "to inspect candidates."
+            ).format(plugin_name)
+
+        top_score = scored[0][0]
+        top_plugins = [plugin for score, plugin in scored if score == top_score]
+
+        # For non-exact lookup, avoid guessing when multiple strongest candidates exist.
+        if len(top_plugins) > 1 and top_score < 1000:
+            options = ", ".join(p.get("name", "?") for p in top_plugins[:5])
+            return (
+                "Multiple plugins match '{0}': {1}. "
+                "Please be more specific or set exact_match=True."
+            ).format(plugin_name, options)
+
+        chosen = top_plugins[0]
+        result = ableton.send_command("load_browser_item", {
+            "track_index": ti,
+            "item_uri": chosen.get("uri"),
+        })
+
+        if result.get("loaded", False):
+            return (
+                "Loaded external plugin '{0}' on track {1} (matched '{2}')."
+            ).format(chosen.get("name", "?"), track_index, plugin_name)
+        return "Failed to load external plugin '{0}'.".format(chosen.get("name", "?"))
+    except Exception as e:
+        logger.error(f"Error loading external plugin: {str(e)}")
+        return f"Error loading external plugin: {str(e)}"
+
 
 @mcp.tool()
 def load_drum_kit(ctx: Context, track_index: int, rack_uri: str, kit_path: str) -> str:

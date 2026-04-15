@@ -925,6 +925,79 @@ class AbletonMCP(ControlSurface):
         except Exception as e:
             self.log_message("Error stopping playback: " + str(e))
             raise
+
+    # Browser helper methods
+
+    def _normalize_browser_category_name(self, category_name):
+        """Normalize browser category names for robust matching."""
+        try:
+            normalized = (category_name or "").strip().lower()
+            normalized = normalized.replace("-", "_").replace(" ", "_")
+            while "__" in normalized:
+                normalized = normalized.replace("__", "_")
+            normalized = normalized.strip("_")
+
+            # Canonical category aliases
+            alias_map = {
+                "instrument": "instruments",
+                "sound": "sounds",
+                "drum": "drums",
+                "audioeffects": "audio_effects",
+                "audio_fx": "audio_effects",
+                "audiofx": "audio_effects",
+                "midieffects": "midi_effects",
+                "midi_fx": "midi_effects",
+                "midifx": "midi_effects",
+                "plugin": "plugins",
+                "vst": "plugins",
+                "vst2": "plugins",
+                "vst3": "plugins",
+                "au": "plugins",
+            }
+
+            if normalized in alias_map:
+                return alias_map[normalized]
+
+            compact = normalized.replace("_", "")
+            if compact in alias_map:
+                return alias_map[compact]
+
+            return normalized
+        except Exception:
+            return (category_name or "").strip().lower()
+
+    def _split_browser_path(self, path):
+        """Split a browser path into normalized path parts."""
+        if not path:
+            return []
+        return [part.strip() for part in path.split("/") if part and part.strip()]
+
+    def _resolve_browser_root_category(self, browser, root_category, browser_attrs=None):
+        """Resolve a root browser category to the corresponding browser item."""
+        normalized_root = self._normalize_browser_category_name(root_category)
+
+        standard_roots = {
+            "instruments": "instruments",
+            "sounds": "sounds",
+            "drums": "drums",
+            "audio_effects": "audio_effects",
+            "midi_effects": "midi_effects",
+            "plugins": "plugins",
+        }
+
+        attr_name = standard_roots.get(normalized_root)
+        if attr_name and hasattr(browser, attr_name):
+            return getattr(browser, attr_name), attr_name
+
+        attrs = browser_attrs if browser_attrs is not None else [a for a in dir(browser) if not a.startswith('_')]
+        for attr in attrs:
+            if self._normalize_browser_category_name(attr) == normalized_root:
+                try:
+                    return getattr(browser, attr), attr
+                except Exception as e:
+                    self.log_message("Error accessing browser attribute {0}: {1}".format(attr, str(e)))
+
+        return None, normalized_root
     
     def _get_browser_item(self, uri, path):
         """Get a browser item by URI or path"""
@@ -957,25 +1030,21 @@ class AbletonMCP(ControlSurface):
             # If URI not provided or not found, try by path
             if path:
                 # Parse the path and navigate to the specified item
-                path_parts = path.split("/")
+                path_parts = self._split_browser_path(path)
+                if not path_parts:
+                    result["error"] = "Invalid path"
+                    return result
                 
                 # Determine the root based on the first part
-                current_item = None
-                if path_parts[0].lower() == "nstruments":
-                    current_item = app.browser.instruments
-                elif path_parts[0].lower() == "sounds":
-                    current_item = app.browser.sounds
-                elif path_parts[0].lower() == "drums":
-                    current_item = app.browser.drums
-                elif path_parts[0].lower() == "audio_effects":
-                    current_item = app.browser.audio_effects
-                elif path_parts[0].lower() == "midi_effects":
-                    current_item = app.browser.midi_effects
-                else:
+                current_item, resolved_attr = self._resolve_browser_root_category(app.browser, path_parts[0])
+                if current_item is None:
                     # Default to instruments if not specified
                     current_item = app.browser.instruments
                     # Don't skip the first part in this case
                     path_parts = ["instruments"] + path_parts
+                elif resolved_attr != "instruments":
+                    # Keep path parts aligned with resolved root
+                    path_parts[0] = resolved_attr
                 
                 # Navigate through the path
                 for i in range(1, len(path_parts)):
@@ -1983,45 +2052,28 @@ class AbletonMCP(ControlSurface):
             self.log_message("Available browser attributes: {0}".format(browser_attrs))
                 
             # Parse the path
-            path_parts = path.split("/")
+            path_parts = self._split_browser_path(path)
             if not path_parts:
                 raise ValueError("Invalid path")
             
             # Determine the root category
-            root_category = path_parts[0].lower()
-            current_item = None
-            
-            # Check standard categories first
-            if root_category == "instruments" and hasattr(app.browser, 'instruments'):
-                current_item = app.browser.instruments
-            elif root_category == "sounds" and hasattr(app.browser, 'sounds'):
-                current_item = app.browser.sounds
-            elif root_category == "drums" and hasattr(app.browser, 'drums'):
-                current_item = app.browser.drums
-            elif root_category == "audio_effects" and hasattr(app.browser, 'audio_effects'):
-                current_item = app.browser.audio_effects
-            elif root_category == "midi_effects" and hasattr(app.browser, 'midi_effects'):
-                current_item = app.browser.midi_effects
-            else:
-                # Try to find the category in other browser attributes
-                found = False
-                for attr in browser_attrs:
-                    if attr.lower() == root_category:
-                        try:
-                            current_item = getattr(app.browser, attr)
-                            found = True
-                            break
-                        except Exception as e:
-                            self.log_message("Error accessing browser attribute {0}: {1}".format(attr, str(e)))
-                
-                if not found:
-                    # If we still haven't found the category, return available categories
-                    return {
-                        "path": path,
-                        "error": "Unknown or unavailable category: {0}".format(root_category),
-                        "available_categories": browser_attrs,
-                        "items": []
-                    }
+            root_category = path_parts[0]
+            current_item, resolved_root = self._resolve_browser_root_category(
+                app.browser, root_category, browser_attrs
+            )
+            if current_item is None:
+                # If we still haven't found the category, return available categories
+                return {
+                    "path": path,
+                    "error": "Unknown or unavailable category: {0}".format(
+                        self._normalize_browser_category_name(root_category)
+                    ),
+                    "available_categories": browser_attrs,
+                    "items": []
+                }
+
+            # Keep path canonicalized to resolved root category
+            path_parts[0] = resolved_root
             
             # Navigate through the path
             for i in range(1, len(path_parts)):
