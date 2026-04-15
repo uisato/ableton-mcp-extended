@@ -2047,6 +2047,36 @@ def delete_device(
 
 
 @mcp.tool()
+def get_track_deletion_status(ctx: Context) -> str:
+    """Check whether session tracks can be deleted right now.
+
+    Returns a quick safety summary so agents can avoid attempting deletes
+    when Ableton's minimum-track constraint would block them.
+    """
+    try:
+        ableton = get_ableton_connection()
+        info = ableton.send_command("get_session_info")
+        track_count = info.get("track_count", 0)
+        max_deletions_now = max(0, track_count - 1)
+
+        if track_count <= 1:
+            return (
+                "Track deletion blocked: 1 session track remaining. "
+                "Ableton requires at least one session track. "
+                "Create a new track before deleting."
+            )
+
+        return (
+            "Track deletion available: {0} session tracks currently exist. "
+            "You can delete up to {1} more track(s) before hitting Ableton's "
+            "minimum-track limit."
+        ).format(track_count, max_deletions_now)
+    except Exception as e:
+        logger.error(f"Error checking track deletion status: {str(e)}")
+        return f"Error checking track deletion status: {str(e)}"
+
+
+@mcp.tool()
 def delete_track(
     ctx: Context,
     track_index: int = 0,
@@ -2060,13 +2090,21 @@ def delete_track(
     """
     try:
         ableton = get_ableton_connection()
+        info = ableton.send_command("get_session_info")
+        track_count = info.get("track_count", 0)
+
+        # Safety guard: Ableton requires at least one session track.
+        if track_count <= 1:
+            return (
+                "Error: Cannot delete the last remaining session track. "
+                "Ableton must always have at least one track. "
+                "Create a new track before deleting."
+            )
 
         # Resolve by name if no index given
         if track_index <= 0:
             if not track_name:
                 return "Error: provide either track_index (1-based) or track_name."
-            info = ableton.send_command("get_session_info")
-            track_count = info.get("track_count", 0)
             matched_index = None
             for i in range(track_count):
                 t = ableton.send_command("get_track_info", {"track_index": i})
