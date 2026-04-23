@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ableton Songwriter"
+  short_description: "Create songs in Ableton with guided intake"
+  default_prompt: "Create a song in Ableton. Ask multiple-choice questions first, then build and mix a clear arrangement."
