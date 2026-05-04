@@ -43,3 +43,6 @@ Thumbs.db
 *.asd
 !AbletonMCP_Remote_Script/*
 .envrc
+
+# Claude Code local settings (machine-specific)
+.claude/settings.local.json
