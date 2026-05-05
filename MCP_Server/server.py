@@ -1,4 +1,9 @@
-# ableton_mcp_server.py
+import os
+import sys
+
+if __package__ in (None, ""):
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from mcp.server.fastmcp import FastMCP, Context
 import socket
 import json
@@ -9,6 +14,12 @@ import time
 from dataclasses import dataclass
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Dict, Any, List, Union
+
+from MCP_Server.plugin_aliases import (
+    get_alias_for_param,
+    get_categories,
+    resolve_alias,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -1694,8 +1705,6 @@ def get_device_parameters(
     Specify category or show_all=True for full parameter details.
     """
     try:
-        from MCP_Server.plugin_aliases import get_categories, get_alias_for_param
-
         ableton = get_ableton_connection()
         ti = _to_zero_based(track_index, "track_index")
         di = _to_zero_based(device_index, "device_index")
@@ -1784,8 +1793,6 @@ def set_device_parameter(
     - value: Normalized value 0.0-1.0.
     """
     try:
-        from MCP_Server.plugin_aliases import resolve_alias
-
         ableton = get_ableton_connection()
         ti = _to_zero_based(track_index, "track_index")
         di = _to_zero_based(device_index, "device_index")
