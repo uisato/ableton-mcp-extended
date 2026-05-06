@@ -130,6 +130,7 @@ class TestCreateCuePointAssignsName:
     @staticmethod
     def _wire_toggle(script, returned_cue):
         script._song.cue_points = ()
+        script.schedule_message = MagicMock(side_effect=lambda _delay, fn: fn())
 
         def toggle():
             script._song.cue_points = (returned_cue,)
@@ -157,3 +158,83 @@ class TestCreateCuePointAssignsName:
         script._create_cue_point(time=16.0, name="")
 
         assert cue.name == "1.1.1"
+
+
+def _make_cue(time, name):
+    cue = MagicMock()
+    cue.time = time
+    cue.name = name
+    return cue
+
+
+class TestGetCuePoints:
+    def test_returns_all_cues(self):
+        script = _make_script()
+        script._song.cue_points = (
+            _make_cue(0.0, "Intro"),
+            _make_cue(32.0, "Drop"),
+        )
+
+        result = script._get_cue_points()
+
+        assert result == {"cue_points": [
+            {"name": "Intro", "time": 0.0},
+            {"name": "Drop", "time": 32.0},
+        ]}
+
+    def test_empty_when_no_cues(self):
+        script = _make_script()
+        script._song.cue_points = ()
+
+        assert script._get_cue_points() == {"cue_points": []}
+
+
+class TestJumpToCueByName:
+    def test_jumps_to_named_cue(self):
+        script = _make_script()
+        drop = _make_cue(32.0, "Drop")
+        script._song.cue_points = (_make_cue(0.0, "Intro"), drop)
+
+        result = script._jump_to_cue(name="Drop")
+
+        drop.jump.assert_called_once_with()
+        assert result == {"name": "Drop", "time": 32.0}
+
+    def test_raises_when_name_not_found(self):
+        script = _make_script()
+        script._song.cue_points = (_make_cue(0.0, "Intro"),)
+
+        try:
+            script._jump_to_cue(name="Nope")
+        except ValueError as e:
+            assert "Nope" in str(e)
+        else:
+            raise AssertionError("expected ValueError")
+
+
+class TestDeleteCuePoint:
+    def test_deletes_cue_at_time(self):
+        script = _make_script()
+        script._song.cue_points = (
+            _make_cue(0.0, "Intro"),
+            _make_cue(32.0, "Drop"),
+        )
+        script.schedule_message = MagicMock(side_effect=lambda _delay, fn: fn())
+
+        result = script._delete_cue_point(time=32.0)
+
+        assert script._song.current_song_time == 32.0
+        script._song.set_or_delete_cue.assert_called_once_with()
+        assert result == {"deleted": True}
+
+    def test_raises_when_no_cue_at_time(self):
+        script = _make_script()
+        script._song.cue_points = (_make_cue(0.0, "Intro"),)
+
+        try:
+            script._delete_cue_point(time=32.0)
+        except ValueError as e:
+            assert "No cue point" in str(e)
+        else:
+            raise AssertionError("expected ValueError")
+        script._song.set_or_delete_cue.assert_not_called()
