@@ -1265,9 +1265,8 @@ class AbletonMCP(ControlSurface):
     def _create_cue_point(self, time, name=""):
         """Create a cue point at the given time.
 
-        On Live versions where ``CuePoint.name`` is read-only the
-        rename is logged and skipped; the locator keeps Live's
-        auto-generated name.
+        If ``name`` is provided, the locator is renamed after creation;
+        rename failures are logged.
         """
         try:
             for cp in tuple(self._song.cue_points):
@@ -1285,15 +1284,12 @@ class AbletonMCP(ControlSurface):
                                     cp.name = name
                                 except (AttributeError, RuntimeError) as e:
                                     self.log_message(
-                                        "CuePoint.name write rejected by Live: " + str(e))
+                                        "CuePoint.name assignment failed: " + str(e))
                                 break
                 except Exception as e:
                     self.log_message("Error finalizing cue point: " + str(e))
 
-            try:
-                self.schedule_message(1, _finalize)
-            except Exception:
-                _finalize()
+            self.schedule_message(1, _finalize)
             return {"time": time, "name": name}
         except Exception as e:
             self.log_message("Error creating cue point: " + str(e))
@@ -1317,10 +1313,7 @@ class AbletonMCP(ControlSurface):
                 except Exception as e:
                     self.log_message("Error finalizing cue delete: " + str(e))
 
-            try:
-                self.schedule_message(1, _finalize)
-            except Exception:
-                _finalize()
+            self.schedule_message(1, _finalize)
             return {"deleted": True}
         except Exception as e:
             self.log_message("Error deleting cue point: " + str(e))
