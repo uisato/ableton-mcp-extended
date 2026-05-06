@@ -1208,7 +1208,7 @@ class AbletonMCP(ControlSurface):
         """Get all cue points."""
         try:
             cue_points = []
-            for cp in self._song.cue_points:
+            for cp in tuple(self._song.cue_points):
                 cue_points.append({"name": cp.name, "time": cp.time})
             return {"cue_points": cue_points}
         except Exception as e:
@@ -1251,7 +1251,7 @@ class AbletonMCP(ControlSurface):
                 self._song.jump_to_prev_cue()
                 return {"direction": "prev", "time": self._song.current_song_time}
             elif name:
-                for cp in self._song.cue_points:
+                for cp in tuple(self._song.cue_points):
                     if cp.name == name:
                         cp.jump()
                         return {"name": cp.name, "time": cp.time}
@@ -1263,18 +1263,37 @@ class AbletonMCP(ControlSurface):
             raise
 
     def _create_cue_point(self, time, name=""):
-        """Create a cue point at the given time."""
+        """Create a cue point at the given time.
+
+        On Live versions where ``CuePoint.name`` is read-only the
+        rename is logged and skipped; the locator keeps Live's
+        auto-generated name.
+        """
         try:
             for cp in tuple(self._song.cue_points):
                 if abs(cp.time - time) < 0.01:
                     raise ValueError("Cue point already exists at this position: " + cp.name)
             self._song.current_song_time = time
-            self._song.set_or_delete_cue()
-            if name:
-                for cp in tuple(self._song.cue_points):
-                    if abs(cp.time - time) < 0.01:
-                        cp.name = name
-                        break
+
+            def _finalize():
+                try:
+                    self._song.set_or_delete_cue()
+                    if name:
+                        for cp in tuple(self._song.cue_points):
+                            if abs(cp.time - time) < 0.01:
+                                try:
+                                    cp.name = name
+                                except (AttributeError, RuntimeError) as e:
+                                    self.log_message(
+                                        "CuePoint.name write rejected by Live: " + str(e))
+                                break
+                except Exception as e:
+                    self.log_message("Error finalizing cue point: " + str(e))
+
+            try:
+                self.schedule_message(1, _finalize)
+            except Exception:
+                _finalize()
             return {"time": time, "name": name}
         except Exception as e:
             self.log_message("Error creating cue point: " + str(e))
@@ -1284,14 +1303,24 @@ class AbletonMCP(ControlSurface):
         """Delete a cue point at the given time."""
         try:
             found = False
-            for cp in self._song.cue_points:
+            for cp in tuple(self._song.cue_points):
                 if abs(cp.time - time) < 0.01:
                     found = True
                     break
             if not found:
                 raise ValueError("No cue point at this position")
             self._song.current_song_time = time
-            self._song.set_or_delete_cue()
+
+            def _finalize():
+                try:
+                    self._song.set_or_delete_cue()
+                except Exception as e:
+                    self.log_message("Error finalizing cue delete: " + str(e))
+
+            try:
+                self.schedule_message(1, _finalize)
+            except Exception:
+                _finalize()
             return {"deleted": True}
         except Exception as e:
             self.log_message("Error deleting cue point: " + str(e))
