@@ -1,3 +1,5 @@
+> Note: This fork adds numerous bug fixes for backward compatability with Live 11.
+
 # Ableton MCP Extended
 **Control Ableton Live using natural language via AI assistants like Claude or Cursor. This project provides a robust Model Context Protocol (MCP) server that translates natural language commands into precise actions within your Ableton Live session.**
 
