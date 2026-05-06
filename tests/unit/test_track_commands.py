@@ -13,7 +13,14 @@ sys.modules['mcp.server.fastmcp'] = _mock_fastmcp
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from MCP_Server.server import delete_track, get_track_deletion_status
+import json
+
+from MCP_Server.server import (
+    delete_track,
+    get_track_deletion_status,
+    get_track_info,
+    load_instrument_or_effect,
+)
 
 
 class TestDeleteTrackSafetyGuard:
@@ -106,3 +113,69 @@ class TestTrackDeletionStatus:
 
         assert "Track deletion available" in result
         assert "up to 3 more track(s)" in result
+
+
+class TestGetTrackInfoOneBasedResponse:
+    """get_track_info exposes 1-based indices to match its 1-based parameter."""
+
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_top_level_and_nested_indices_are_one_based(self, mock_conn):
+        mock_ableton = MagicMock()
+        mock_ableton.send_command.return_value = {
+            "index": 4,
+            "name": "5-Operator",
+            "is_audio_track": False,
+            "is_midi_track": True,
+            "is_group_track": False,
+            "clip_slots": [
+                {"index": 0, "has_clip": False, "clip": None},
+                {"index": 1, "has_clip": False, "clip": None},
+            ],
+            "devices": [
+                {"index": 0, "name": "Operator", "class_name": "Operator", "type": "unknown"},
+                {"index": 1, "name": "EQ Eight", "class_name": "Eq8", "type": "unknown"},
+            ],
+        }
+        mock_conn.return_value = mock_ableton
+
+        result = json.loads(get_track_info(MagicMock(), track_index=5))
+
+        assert result["index"] == 5
+        assert [s["index"] for s in result["clip_slots"]] == [1, 2]
+        assert [d["index"] for d in result["devices"]] == [1, 2]
+
+
+class TestLoadInstrumentOrEffectMessage:
+    """Success message must not end with an empty 'Devices on track:' fragment."""
+
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_uses_devices_after_when_remote_script_returns_them(self, mock_conn):
+        mock_ableton = MagicMock()
+        mock_ableton.send_command.return_value = {
+            "loaded": True,
+            "item_name": "Operator",
+            "devices_after": ["Operator"],
+            "new_devices": ["Operator"],
+        }
+        mock_conn.return_value = mock_ableton
+
+        result = load_instrument_or_effect(
+            MagicMock(), track_index=5, uri="query:Synths#Operator")
+
+        assert "New devices: Operator" in result
+
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_falls_back_to_item_name_when_devices_missing(self, mock_conn):
+        mock_ableton = MagicMock()
+        mock_ableton.send_command.return_value = {
+            "loaded": True,
+            "item_name": "Operator",
+        }
+        mock_conn.return_value = mock_ableton
+
+        result = load_instrument_or_effect(
+            MagicMock(), track_index=5, uri="query:Synths#Operator")
+
+        assert "Operator" in result
+        assert not result.rstrip().endswith(":")
+        assert "Devices on track: " not in result

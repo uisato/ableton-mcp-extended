@@ -415,6 +415,15 @@ def get_track_info(ctx: Context, track_index: int) -> str:
         ableton = get_ableton_connection()
         ti = _to_zero_based(track_index, "track_index")
         result = ableton.send_command("get_track_info", {"track_index": ti})
+        if isinstance(result, dict):
+            if isinstance(result.get("index"), int):
+                result["index"] = result["index"] + 1
+            for key in ("clip_slots", "devices"):
+                items = result.get(key)
+                if isinstance(items, list):
+                    for item in items:
+                        if isinstance(item, dict) and isinstance(item.get("index"), int):
+                            item["index"] = item["index"] + 1
         return json.dumps(result, indent=2)
     except Exception as e:
         logger.error(f"Error getting track info from Ableton: {str(e)}")
@@ -664,14 +673,17 @@ def load_instrument_or_effect(ctx: Context, track_index: int, uri: str) -> str:
             "item_uri": uri
         })
         
-        # Check if the instrument was loaded successfully
         if result.get("loaded", False):
             new_devices = result.get("new_devices", [])
             if new_devices:
                 return f"Loaded instrument with URI '{uri}' on track {track_index}. New devices: {', '.join(new_devices)}"
-            else:
-                devices = result.get("devices_after", [])
+            devices = result.get("devices_after", [])
+            if devices:
                 return f"Loaded instrument with URI '{uri}' on track {track_index}. Devices on track: {', '.join(devices)}"
+            item_name = result.get("item_name", "")
+            if item_name:
+                return f"Loaded '{item_name}' on track {track_index}."
+            return f"Loaded instrument with URI '{uri}' on track {track_index}."
         else:
             return f"Failed to load instrument with URI '{uri}'"
     except Exception as e:
