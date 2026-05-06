@@ -1128,6 +1128,13 @@ def load_external_plugin(
         return f"Error loading external plugin: {str(e)}"
 
 
+_BROWSER_URI_SCHEME_RE = re.compile(r"^[a-z][a-z0-9.+-]*:")
+
+
+def _looks_like_browser_uri(value: str) -> bool:
+    return isinstance(value, str) and bool(_BROWSER_URI_SCHEME_RE.match(value))
+
+
 @mcp.tool()
 def load_drum_kit(ctx: Context, track_index: int, rack_uri: str, kit_path: str) -> str:
     """
@@ -1135,45 +1142,51 @@ def load_drum_kit(ctx: Context, track_index: int, rack_uri: str, kit_path: str) 
 
     Parameters:
     - track_index: Track number (1-based).
-    - rack_uri: The URI of the drum rack to load (e.g., 'Drums/Drum Rack').
-    - kit_path: Path to the drum kit inside the browser (e.g., 'drums/acoustic/kit1').
+    - rack_uri: Browser URI of the drum rack (e.g., 'query:Drums#Drum%20Rack').
+    - kit_path: Either a browser URI of the kit (e.g., 'query:Drums#FileId_4197')
+                or a browser path. Stock kits live as .adg leaves directly under
+                'drums', e.g. 'drums/808 Core Kit.adg'. Folder paths fall back
+                to loading the first loadable child (e.g. 'user-library/My Kits').
     """
     try:
         ableton = get_ableton_connection()
         ti = _to_zero_based(track_index, "track_index")
 
-        # Step 1: Load the drum rack
-        result = ableton.send_command("load_browser_item", {
+        rack_result = ableton.send_command("load_browser_item", {
             "track_index": ti,
-            "item_uri": rack_uri
+            "item_uri": rack_uri,
         })
-        
-        if not result.get("loaded", False):
+        if not rack_result.get("loaded", False):
             return f"Failed to load drum rack with URI '{rack_uri}'"
-        
-        # Step 2: Get the drum kit items at the specified path
-        kit_result = ableton.send_command("get_browser_items_at_path", {
-            "path": kit_path
-        })
-        
-        if "error" in kit_result:
-            return f"Loaded drum rack but failed to find drum kit: {kit_result.get('error')}"
-        
-        # Step 3: Find a loadable drum kit
-        kit_items = kit_result.get("items", [])
-        loadable_kits = [item for item in kit_items if item.get("is_loadable", False)]
-        
-        if not loadable_kits:
-            return f"Loaded drum rack but no loadable drum kits found at '{kit_path}'"
-        
-        # Step 4: Load the first loadable kit
-        kit_uri = loadable_kits[0].get("uri")
-        load_result = ableton.send_command("load_browser_item", {
+
+        if _looks_like_browser_uri(kit_path):
+            kit_uri = kit_path
+            kit_name = kit_path
+        else:
+            kit_result = ableton.send_command("get_browser_items_at_path", {
+                "path": kit_path,
+            })
+            if "error" in kit_result:
+                return f"Loaded drum rack but failed to find drum kit: {kit_result.get('error')}"
+
+            if kit_result.get("is_loadable") and kit_result.get("uri"):
+                kit_uri = kit_result["uri"]
+                kit_name = kit_result.get("name") or kit_path
+            else:
+                loadable_kits = [
+                    item for item in kit_result.get("items", [])
+                    if item.get("is_loadable", False)
+                ]
+                if not loadable_kits:
+                    return f"Loaded drum rack but no loadable drum kits found at '{kit_path}'"
+                kit_uri = loadable_kits[0].get("uri")
+                kit_name = loadable_kits[0].get("name")
+
+        ableton.send_command("load_browser_item", {
             "track_index": ti,
-            "item_uri": kit_uri
+            "item_uri": kit_uri,
         })
-        
-        return f"Loaded drum rack and kit '{loadable_kits[0].get('name')}' on track {track_index}"
+        return f"Loaded drum rack and kit '{kit_name}' on track {track_index}"
     except Exception as e:
         logger.error(f"Error loading drum kit: {str(e)}")
         return f"Error loading drum kit: {str(e)}"

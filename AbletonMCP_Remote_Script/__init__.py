@@ -2025,85 +2025,81 @@ class AbletonMCP(ControlSurface):
             result = {
                 "type": category_type,
                 "categories": [],
-                "available_categories": browser_attrs
+                "available_categories": browser_attrs,
+                "total_folders": 0,
             }
-            
-            # Helper function to process a browser item and its children
-            def process_item(item, depth=0):
+
+            max_depth = 2
+            max_children = 25
+
+            def process_item(item, depth=0, parent_path="", name_override=None):
                 if not item:
-                    return None
-                
-                result = {
-                    "name": item.name if hasattr(item, 'name') else "Unknown",
-                    "is_folder": hasattr(item, 'children') and bool(item.children),
+                    return None, 0
+
+                name = name_override if name_override is not None else (
+                    item.name if hasattr(item, 'name') else "Unknown"
+                )
+                children_iter = tuple(item.children) if hasattr(item, 'children') else ()
+                is_folder = bool(children_iter)
+                item_path = (parent_path + "/" + name) if parent_path else name
+
+                node = {
+                    "name": name,
+                    "is_folder": is_folder,
                     "is_device": hasattr(item, 'is_device') and item.is_device,
                     "is_loadable": hasattr(item, 'is_loadable') and item.is_loadable,
                     "uri": item.uri if hasattr(item, 'uri') else None,
-                    "children": []
+                    "path": item_path,
+                    "children": [],
+                    "has_more": False,
                 }
-                
-                
-                return result
-            
-            # Process based on category type and available attributes
-            if (category_type == "all" or category_type == "instruments") and hasattr(app.browser, 'instruments'):
+                folder_count = 1 if is_folder else 0
+
+                if is_folder and depth < max_depth:
+                    visible = children_iter[:max_children]
+                    if len(children_iter) > max_children:
+                        node["has_more"] = True
+                    for child in visible:
+                        child_node, child_folders = process_item(child, depth + 1, item_path)
+                        if child_node:
+                            node["children"].append(child_node)
+                            folder_count += child_folders
+                elif is_folder and depth >= max_depth:
+                    node["has_more"] = True
+
+                return node, folder_count
+
+            def _append_category(attr, display_name):
                 try:
-                    instruments = process_item(app.browser.instruments)
-                    if instruments:
-                        instruments["name"] = "Instruments"  # Ensure consistent naming
-                        result["categories"].append(instruments)
+                    root_item = getattr(app.browser, attr, None)
+                    if root_item is None:
+                        return
+                    node, folder_count = process_item(root_item, name_override=display_name)
+                    if node is None:
+                        return
+                    result["categories"].append(node)
+                    result["total_folders"] += folder_count
                 except Exception as e:
-                    self.log_message("Error processing instruments: {0}".format(str(e)))
-            
-            if (category_type == "all" or category_type == "sounds") and hasattr(app.browser, 'sounds'):
-                try:
-                    sounds = process_item(app.browser.sounds)
-                    if sounds:
-                        sounds["name"] = "Sounds"  # Ensure consistent naming
-                        result["categories"].append(sounds)
-                except Exception as e:
-                    self.log_message("Error processing sounds: {0}".format(str(e)))
-            
-            if (category_type == "all" or category_type == "drums") and hasattr(app.browser, 'drums'):
-                try:
-                    drums = process_item(app.browser.drums)
-                    if drums:
-                        drums["name"] = "Drums"  # Ensure consistent naming
-                        result["categories"].append(drums)
-                except Exception as e:
-                    self.log_message("Error processing drums: {0}".format(str(e)))
-            
-            if (category_type == "all" or category_type == "audio_effects") and hasattr(app.browser, 'audio_effects'):
-                try:
-                    audio_effects = process_item(app.browser.audio_effects)
-                    if audio_effects:
-                        audio_effects["name"] = "Audio Effects"  # Ensure consistent naming
-                        result["categories"].append(audio_effects)
-                except Exception as e:
-                    self.log_message("Error processing audio_effects: {0}".format(str(e)))
-            
-            if (category_type == "all" or category_type == "midi_effects") and hasattr(app.browser, 'midi_effects'):
-                try:
-                    midi_effects = process_item(app.browser.midi_effects)
-                    if midi_effects:
-                        midi_effects["name"] = "MIDI Effects"
-                        result["categories"].append(midi_effects)
-                except Exception as e:
-                    self.log_message("Error processing midi_effects: {0}".format(str(e)))
-            
-            # Try to process other potentially available categories
+                    self.log_message("Error processing {0}: {1}".format(attr, str(e)))
+
+            named_categories = [
+                ("instruments", "Instruments"),
+                ("sounds", "Sounds"),
+                ("drums", "Drums"),
+                ("audio_effects", "Audio Effects"),
+                ("midi_effects", "MIDI Effects"),
+            ]
+            for attr, display_name in named_categories:
+                if (category_type == "all" or category_type == attr) and hasattr(app.browser, attr):
+                    _append_category(attr, display_name)
+
+            handled = {attr for attr, _ in named_categories}
             for attr in browser_attrs:
-                if attr not in ['instruments', 'sounds', 'drums', 'audio_effects', 'midi_effects'] and \
-                   (category_type == "all" or category_type == attr):
-                    try:
-                        item = getattr(app.browser, attr)
-                        if hasattr(item, 'children') or hasattr(item, 'name'):
-                            category = process_item(item)
-                            if category:
-                                category["name"] = attr.capitalize()
-                                result["categories"].append(category)
-                    except Exception as e:
-                        self.log_message("Error processing {0}: {1}".format(attr, str(e)))
+                if attr in handled:
+                    continue
+                if category_type != "all" and category_type != attr:
+                    continue
+                _append_category(attr, attr.capitalize())
             
             self.log_message("Browser tree generated for {0} with {1} root categories".format(
                 category_type, len(result['categories'])))
