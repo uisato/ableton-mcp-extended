@@ -317,7 +317,8 @@ class AbletonMCP(ControlSurface):
                             ti = params.get("track_index", 0)
                             pos = params.get("position", 0.0)
                             length = params.get("length", 4.0)
-                            result = self._create_arrangement_clip(ti, pos, length)
+                            name = params.get("name", "")
+                            result = self._create_arrangement_clip(ti, pos, length, name=name)
                         elif command_type == "create_arrangement_audio_clip":
                             ti = params.get("track_index", 0)
                             pos = params.get("position", 0.0)
@@ -613,14 +614,17 @@ class AbletonMCP(ControlSurface):
                     "type": self._get_device_type(device)
                 })
             
+            is_group = bool(getattr(track, "is_foldable", False))
+
             result = {
                 "index": track_index,
                 "name": track.name,
                 "is_audio_track": track.has_audio_input,
                 "is_midi_track": track.has_midi_input,
+                "is_group_track": is_group,
                 "mute": track.mute,
                 "solo": track.solo,
-                "arm": track.arm,
+                "arm": None if is_group else track.arm,
                 "volume": track.mixer_device.volume.value,
                 "panning": track.mixer_device.panning.value,
                 "clip_slots": clip_slots,
@@ -1174,17 +1178,23 @@ class AbletonMCP(ControlSurface):
                 tracks = [(track_index, self._song.tracks[track_index])]
 
             for idx, track in tracks:
+                is_group = bool(getattr(track, "is_foldable", False))
+                if is_group and track_index == -1:
+                    continue
+
                 clips = []
-                for ci, clip in enumerate(track.arrangement_clips):
-                    clip_info = self._get_arrangement_clip_info(clip)
-                    clip_info["index"] = ci
-                    clips.append(clip_info)
+                if not is_group:
+                    for ci, clip in enumerate(track.arrangement_clips):
+                        clip_info = self._get_arrangement_clip_info(clip)
+                        clip_info["index"] = ci
+                        clips.append(clip_info)
 
                 tracks_data.append({
                     "index": idx,
                     "name": track.name,
                     "is_midi": track.has_midi_input,
                     "is_audio": track.has_audio_input,
+                    "is_group_track": is_group,
                     "arrangement_clips": clips,
                     "clip_count": len(clips),
                 })
@@ -1255,12 +1265,16 @@ class AbletonMCP(ControlSurface):
     def _create_cue_point(self, time, name=""):
         """Create a cue point at the given time."""
         try:
-            # Check if cue already exists at this position
-            for cp in self._song.cue_points:
+            for cp in tuple(self._song.cue_points):
                 if abs(cp.time - time) < 0.01:
                     raise ValueError("Cue point already exists at this position: " + cp.name)
             self._song.current_song_time = time
             self._song.set_or_delete_cue()
+            if name:
+                for cp in tuple(self._song.cue_points):
+                    if abs(cp.time - time) < 0.01:
+                        cp.name = name
+                        break
             return {"time": time, "name": name}
         except Exception as e:
             self.log_message("Error creating cue point: " + str(e))
@@ -1295,26 +1309,62 @@ class AbletonMCP(ControlSurface):
         if track == self._song.master_track:
             raise ValueError("Cannot create arrangement clips on master track")
 
-    def _create_arrangement_clip(self, track_index, position, length):
-        """Create MIDI clip in arrangement."""
+    def _create_arrangement_clip(self, track_index, position, length, name=""):
+        """Create MIDI clip in arrangement.
+
+        Live 12 exposes Track.create_midi_clip(start_time, length) directly.
+        Live 11 has no such method, so round-trip through a session slot:
+        create_clip -> duplicate_clip_to_arrangement -> delete the session clip.
+        """
         try:
             if track_index < 0 or track_index >= len(self._song.tracks):
                 raise IndexError("Track index out of range")
             self._validate_not_return_or_master(track_index)
             track = self._song.tracks[track_index]
             overlapped = self._check_overlap(track, position, length)
-            track.create_midi_clip(position, length)
-            # Find the newly created clip
-            result = {"start_time": position, "length": length, "is_midi": True}
-            for clip in track.arrangement_clips:
-                if abs(clip.start_time - position) < 0.01:
-                    result = self._get_arrangement_clip_info(clip)
-                    break
+
+            create_midi_clip = getattr(track, "create_midi_clip", None)
+            if create_midi_clip is not None:
+                new_clip = create_midi_clip(position, length)
+            else:
+                new_clip = self._create_arrangement_clip_via_session(track, position, length)
+
+            if new_clip is None:
+                for clip in tuple(track.arrangement_clips):
+                    if abs(clip.start_time - position) < 0.01:
+                        new_clip = clip
+                        break
+
+            if new_clip is not None and name:
+                new_clip.name = name
+
+            if new_clip is not None:
+                result = self._get_arrangement_clip_info(new_clip)
+            else:
+                result = {"start_time": position, "length": length, "is_midi": True}
             result["overlapped_clips"] = overlapped
             return result
         except Exception as e:
             self.log_message("Error creating arrangement clip: " + str(e))
             raise
+
+    def _create_arrangement_clip_via_session(self, track, position, length):
+        slot_index = -1
+        for i, slot in enumerate(track.clip_slots):
+            if not slot.has_clip:
+                slot_index = i
+                break
+        if slot_index < 0:
+            raise RuntimeError(
+                "No empty session clip slot available on track '{0}'; "
+                "Live 11 needs one free slot to stage an arrangement MIDI clip".format(
+                    getattr(track, "name", "?")))
+        slot = track.clip_slots[slot_index]
+        slot.create_clip(length)
+        try:
+            return track.duplicate_clip_to_arrangement(slot.clip, position)
+        finally:
+            slot.delete_clip()
 
     def _create_arrangement_audio_clip(self, track_index, position, file_path):
         """Create audio clip in arrangement from file."""

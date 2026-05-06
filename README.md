@@ -87,9 +87,9 @@ pip install -e .
 ```
 
 ### 2. **Install Ableton Script**
-1. Find your Ableton Remote Scripts folder:
+1. Find your Ableton User Library Remote Scripts folder:
    - **Windows**: `C:\Users\[You]\Documents\Ableton\User Library\Remote Scripts\`
-   - **Mac**: `~/Library/Preferences/Ableton/Live [Version]/User Remote Scripts/`
+   - **Mac**: `~/Music/Ableton/User Library/Remote Scripts/`
 2. Create folder: `AbletonMCP`
 3. Copy `AbletonMCP_Remote_Script/__init__.py` into this folder
 
