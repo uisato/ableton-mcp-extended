@@ -1371,6 +1371,24 @@ def jump_to_cue_point(ctx: Context, direction: str = "", name: str = "") -> str:
         return f"Error jumping to cue point: {str(e)}"
 
 
+def _readback_cue_name(ableton, time_val: float, attempts: int = 4, delay: float = 0.05):
+    """Return the actual locator name at ``time_val`` after a create.
+
+    The Remote Script defers cue creation + rename via ``schedule_message`` so
+    the remote can move the playhead first; a tight retry covers the race
+    between our follow-up read and Live's tick.
+    """
+    import time as _time
+    for i in range(attempts):
+        result = ableton.send_command("get_cue_points", {})
+        for cp in result.get("cue_points", []):
+            if abs(cp.get("time", -1) - time_val) < 0.01:
+                return cp.get("name", "")
+        if i < attempts - 1:
+            _time.sleep(delay)
+    return None
+
+
 @mcp.tool()
 def create_cue_point(ctx: Context, bar: int = 0, beat: float = 0.0, name: str = "") -> str:
     """Create a cue point at a position.
@@ -1383,8 +1401,17 @@ def create_cue_point(ctx: Context, bar: int = 0, beat: float = 0.0, name: str = 
     try:
         ableton = get_ableton_connection()
         time_val = _convert_bar_to_beat(bar, beat)
-        result = ableton.send_command("create_cue_point", {"time": time_val, "name": name})
-        return f"Created cue point '{name}' at bar {bar if bar > 0 else '?'}"
+        ableton.send_command("create_cue_point", {"time": time_val, "name": name})
+        bar_str = str(bar) if bar > 0 else "?"
+        actual_name = _readback_cue_name(ableton, time_val)
+        if actual_name is None:
+            return f"Created cue point at bar {bar_str}"
+        if name and actual_name != name:
+            return (f"Created cue point '{actual_name}' at bar {bar_str} "
+                    f"(requested name '{name}' not applied)")
+        if actual_name:
+            return f"Created cue point '{actual_name}' at bar {bar_str}"
+        return f"Created cue point at bar {bar_str}"
     except Exception as e:
         logger.error(f"Error creating cue point: {str(e)}")
         return f"Error creating cue point: {str(e)}"

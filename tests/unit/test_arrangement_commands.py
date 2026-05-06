@@ -179,19 +179,77 @@ class TestJumpToCuePointCommand:
 class TestCreateCuePointCommand:
     """Test create/delete cue point commands."""
 
+    @staticmethod
+    def _wire(mock_conn, readback_cues):
+        mock_ableton = MagicMock()
+        def send(cmd, _params=None):
+            if cmd == "get_cue_points":
+                return {"cue_points": readback_cues}
+            return {}
+        mock_ableton.send_command.side_effect = send
+        mock_conn.return_value = mock_ableton
+        return mock_ableton
+
     @patch('MCP_Server.server._get_time_signature', return_value=(4, 4))
     @patch('MCP_Server.server.get_ableton_connection')
-    def test_create_at_bar(self, mock_conn, mock_ts):
+    def test_create_at_bar_sends_correct_params(self, mock_conn, mock_ts):
         # Creating a cue point at bar 5 should convert to beat 16.0 and include the name
-        mock_ableton = MagicMock()
-        mock_ableton.send_command.return_value = {}
-        mock_conn.return_value = mock_ableton
+        mock_ableton = self._wire(mock_conn, [{"time": 16.0, "name": "Bridge"}])
 
         from MCP_Server.server import create_cue_point
         create_cue_point(MagicMock(), bar=5, name="Bridge")
 
-        mock_ableton.send_command.assert_called_with(
+        mock_ableton.send_command.assert_any_call(
             "create_cue_point", {"time": 16.0, "name": "Bridge"})
+
+    @patch('MCP_Server.server._get_time_signature', return_value=(4, 4))
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_response_uses_readback_name_when_applied(self, mock_conn, mock_ts):
+        self._wire(mock_conn, [{"time": 16.0, "name": "Bridge"}])
+
+        from MCP_Server.server import create_cue_point
+        result = create_cue_point(MagicMock(), bar=5, name="Bridge")
+
+        assert "Bridge" in result
+        assert "not applied" not in result
+        assert "bar 5" in result
+
+    @patch('MCP_Server.server._get_time_signature', return_value=(4, 4))
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_response_warns_when_name_not_applied(self, mock_conn, mock_ts):
+        # Live 11 returns the locator default name ("1") regardless of requested name.
+        self._wire(mock_conn, [{"time": 16.0, "name": "1"}])
+
+        from MCP_Server.server import create_cue_point
+        result = create_cue_point(MagicMock(), bar=5, name="Bridge")
+
+        assert "not applied" in result
+        assert "Bridge" in result
+        assert "'1'" in result
+        assert "bar 5" in result
+
+    @patch('MCP_Server.server._get_time_signature', return_value=(4, 4))
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_response_no_name_requested_uses_actual(self, mock_conn, mock_ts):
+        self._wire(mock_conn, [{"time": 16.0, "name": "1"}])
+
+        from MCP_Server.server import create_cue_point
+        result = create_cue_point(MagicMock(), bar=5, name="")
+
+        assert "not applied" not in result
+        assert "bar 5" in result
+
+    @patch('MCP_Server.server._get_time_signature', return_value=(4, 4))
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_falls_back_when_readback_finds_nothing(self, mock_conn, mock_ts):
+        # If the readback can't find the cue (race/failure), don't lie about state — fall back.
+        self._wire(mock_conn, [])
+
+        from MCP_Server.server import create_cue_point
+        result = create_cue_point(MagicMock(), bar=5, name="Bridge")
+
+        assert "bar 5" in result
+        # No false "name applied" claim and no false "not applied" claim either.
 
     @patch('MCP_Server.server._get_time_signature', return_value=(4, 4))
     @patch('MCP_Server.server.get_ableton_connection')
