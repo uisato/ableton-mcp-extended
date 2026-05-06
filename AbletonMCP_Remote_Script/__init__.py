@@ -349,10 +349,11 @@ class AbletonMCP(ControlSurface):
                             result = self._control_arrangement_view(action, ti)
                         elif command_type == "manage_clip_automation":
                             ti = params.get("track_index", 0)
-                            ci = params.get("clip_index", 0)
+                            ci = params.get("clip_index", None)
+                            cn = params.get("clip_name", None)
                             action = params.get("action", "create")
                             pn = params.get("parameter_name", "")
-                            result = self._manage_clip_automation(ti, ci, action, pn)
+                            result = self._manage_clip_automation(ti, ci, action, pn, cn)
                         elif command_type == "add_notes_to_arrangement_clip":
                             ti = params.get("track_index", 0)
                             ci = params.get("clip_index", 0)
@@ -1495,39 +1496,16 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error controlling arrangement view: " + str(e))
             raise
 
-    def _manage_clip_automation(self, track_index, clip_index, action, parameter_name=""):
-        """Create or clear automation envelopes."""
+    def _manage_clip_automation(self, track_index, clip_index, action,
+                                parameter_name="", clip_name=None):
+        """Create or clear automation envelopes on a session clip."""
         try:
-            track, clip = self._resolve_arrangement_clip(track_index, clip_index)
+            track, clip = self._resolve_session_clip(
+                track_index, clip_index, clip_name)
             if action == "clear_all":
                 clip.clear_all_envelopes()
                 return {"action": "clear_all", "done": True}
-            # Find the parameter
-            param = None
-            # Check mixer device first
-            mixer = track.mixer_device
-            for p in [mixer.volume, mixer.panning]:
-                if p.name.lower() == parameter_name.lower():
-                    param = p
-                    break
-            # Check sends
-            if param is None:
-                for send in mixer.sends:
-                    if send.name.lower() == parameter_name.lower():
-                        param = send
-                        break
-            # Check track devices
-            if param is None:
-                for device in track.devices:
-                    for p in device.parameters:
-                        if p.name.lower() == parameter_name.lower():
-                            param = p
-                            break
-                    if param:
-                        break
-            if param is None:
-                raise ValueError("Parameter '{0}' not found on track '{1}'".format(
-                    parameter_name, track.name))
+            param = self._find_automatable_parameter(track, parameter_name)
             if action == "create":
                 clip.create_automation_envelope(param)
                 return {"action": "create", "parameter": param.name, "done": True}
@@ -1539,6 +1517,63 @@ class AbletonMCP(ControlSurface):
         except Exception as e:
             self.log_message("Error managing clip automation: " + str(e))
             raise
+
+    def _resolve_session_clip(self, track_index, clip_index=None, clip_name=None):
+        """Resolve a session clip by slot index or clip name."""
+        if track_index < 0 or track_index >= len(self._song.tracks):
+            raise IndexError("Track index {0} out of range (0-{1})".format(
+                track_index, len(self._song.tracks) - 1))
+        track = self._song.tracks[track_index]
+        slots = tuple(track.clip_slots)
+
+        if clip_name:
+            matches = [(i, s.clip) for i, s in enumerate(slots)
+                       if s.has_clip and s.clip.name == clip_name]
+            if not matches:
+                raise ValueError("No session clip named '{0}' on track '{1}'".format(
+                    clip_name, track.name))
+            if len(matches) > 1:
+                raise ValueError("Ambiguous: {0} session clips named '{1}' on track '{2}'".format(
+                    len(matches), clip_name, track.name))
+            return track, matches[0][1]
+
+        if clip_index is None:
+            raise ValueError("Either clip_index or clip_name must be provided")
+        if clip_index < 0 or clip_index >= len(slots):
+            raise IndexError("Clip slot {0} out of range (0-{1}) on track '{2}'".format(
+                clip_index, len(slots) - 1, track.name))
+        slot = slots[clip_index]
+        if not slot.has_clip:
+            raise ValueError("No clip in session slot {0} on track '{1}'".format(
+                clip_index, track.name))
+        return track, slot.clip
+
+    def _find_automatable_parameter(self, track, parameter_name):
+        """Find a parameter on a track by name, with mixer-volume/pan aliases."""
+        if not parameter_name:
+            raise ValueError("parameter_name is required")
+        target = parameter_name.strip().lower()
+        mixer = track.mixer_device
+
+        aliases = {
+            "volume": mixer.volume,
+            "track volume": mixer.volume,
+            "pan": mixer.panning,
+            "panning": mixer.panning,
+            "track panning": mixer.panning,
+        }
+        if target in aliases:
+            return aliases[target]
+
+        for send in tuple(mixer.sends):
+            if send.name.strip().lower() == target:
+                return send
+        for device in tuple(track.devices):
+            for p in tuple(device.parameters):
+                if p.name.strip().lower() == target:
+                    return p
+        raise ValueError("Parameter '{0}' not found on track '{1}'".format(
+            parameter_name, track.name))
 
     # ── Device command handlers ──────────────────────────────────────
 

@@ -1665,29 +1665,40 @@ def manage_clip_automation(
     action: str = "create",
     parameter_name: str = "volume",
 ) -> str:
-    """Create or clear automation envelopes on arrangement clips.
+    """Create or clear automation envelopes on a session clip.
+
+    Live's Clip.create_automation_envelope only accepts session clips, so
+    this tool resolves against the track's clip_slots.
 
     Parameters:
     - track_index: Track number (1-based).
-    - clip_index: Clip position (1-based).
-    - clip_name: Clip name (alternative to clip_index).
+    - clip_index: Session clip slot (1-based). Ignored when clip_name is set.
+    - clip_name: Resolve by clip name across the track's slots.
     - action: "create", "clear", or "clear_all".
-    - parameter_name: Parameter to automate (e.g., "volume", "panning").
+    - parameter_name: Parameter to automate. Aliases "volume" and "panning"
+      map to Track Volume / Track Panning. Otherwise matched by exact
+      (case-insensitive) name against mixer sends and devices on the track.
     """
     try:
         ableton = get_ableton_connection()
         ti = _to_zero_based(track_index, "track_index")
-        ci = _to_zero_based(clip_index, "clip_index") if clip_index > 0 else 0
-        result = ableton.send_command("manage_clip_automation", {
+        payload = {
             "track_index": ti,
-            "clip_index": ci,
             "action": action,
             "parameter_name": parameter_name,
-        })
+        }
+        if clip_name:
+            payload["clip_name"] = clip_name
+        else:
+            payload["clip_index"] = _to_zero_based(clip_index, "clip_index")
 
+        result = ableton.send_command("manage_clip_automation", payload)
+
+        target = clip_name or f"slot {clip_index}"
         if action == "clear_all":
-            return f"Cleared all automation on clip {clip_index}, track {track_index}"
-        return f"Automation {action}: {parameter_name} on clip {clip_index}, track {track_index}"
+            return f"Cleared all automation on {target}, track {track_index}"
+        param = result.get("parameter", parameter_name)
+        return f"Automation {action}: {param} on {target}, track {track_index}"
     except Exception as e:
         logger.error(f"Error managing clip automation: {str(e)}")
         return f"Error managing clip automation: {str(e)}"

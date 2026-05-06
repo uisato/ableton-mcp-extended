@@ -461,3 +461,51 @@ class TestManageClipAutomationCommand:
             MagicMock(), track_index=1, clip_index=1, action="clear_all")
 
         assert "Cleared all" in result
+
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_clip_name_forwarded_and_takes_precedence(self, mock_conn):
+        # clip_name must be forwarded; clip_index must NOT be sent so the
+        # Remote Script resolves by name unambiguously.
+        mock_ableton = MagicMock()
+        mock_ableton.send_command.return_value = {"action": "create", "done": True}
+        mock_conn.return_value = mock_ableton
+
+        from MCP_Server.server import manage_clip_automation
+        manage_clip_automation(
+            MagicMock(), track_index=2, clip_index=4, clip_name="Lead",
+            action="create", parameter_name="volume")
+
+        payload = mock_ableton.send_command.call_args[0][1]
+        assert payload["clip_name"] == "Lead"
+        assert "clip_index" not in payload
+        assert payload["track_index"] == 1
+
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_remote_parameter_name_surfaces_in_message(self, mock_conn):
+        # Server must not fabricate the parameter — it should reflect what
+        # the Remote Script reports (e.g. "Track Volume" for an alias).
+        mock_ableton = MagicMock()
+        mock_ableton.send_command.return_value = {
+            "action": "create", "parameter": "Track Volume", "done": True}
+        mock_conn.return_value = mock_ableton
+
+        from MCP_Server.server import manage_clip_automation
+        result = manage_clip_automation(
+            MagicMock(), track_index=1, clip_index=1,
+            action="create", parameter_name="volume")
+
+        assert "Track Volume" in result
+
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_zero_clip_index_without_name_errors(self, mock_conn):
+        # 0 violates the 1-based contract; reject before round-tripping.
+        mock_ableton = MagicMock()
+        mock_conn.return_value = mock_ableton
+
+        from MCP_Server.server import manage_clip_automation
+        result = manage_clip_automation(
+            MagicMock(), track_index=1, clip_index=0,
+            action="create", parameter_name="volume")
+
+        assert "Error" in result
+        mock_ableton.send_command.assert_not_called()
