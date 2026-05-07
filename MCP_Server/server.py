@@ -1365,7 +1365,20 @@ def jump_to_cue_point(ctx: Context, direction: str = "", name: str = "") -> str:
         if name:
             params["name"] = name
         result = ableton.send_command("jump_to_cue", params)
-        return f"Jumped to cue point: {result}"
+
+        landed_name = result.get("name")
+        landed_dir = result.get("direction")
+        time_val = result.get("time")
+        location = ""
+        if time_val is not None:
+            num, denom = _get_time_signature()
+            location = f" at bar {beat_to_bar(time_val, num, denom)}"
+
+        if landed_name:
+            return f"Jumped to cue point '{landed_name}'{location}"
+        if landed_dir:
+            return f"Jumped {landed_dir} to cue point{location}"
+        return f"Jumped to cue point{location}"
     except Exception as e:
         logger.error(f"Error jumping to cue point: {str(e)}")
         return f"Error jumping to cue point: {str(e)}"
@@ -1422,7 +1435,11 @@ def create_cue_point(ctx: Context, bar: int = 0, beat: float = 0.0, name: str = 
         ableton = get_ableton_connection()
         time_val = _convert_bar_to_beat(bar, beat)
         ableton.send_command("create_cue_point", {"time": time_val, "name": name})
-        bar_str = str(bar) if bar > 0 else "?"
+        if bar > 0:
+            bar_str = str(bar)
+        else:
+            num, denom = _get_time_signature()
+            bar_str = str(beat_to_bar(time_val, num, denom))
         actual_name = _readback_cue_name(ableton, time_val)
         if actual_name is None:
             return f"Created cue point at bar {bar_str}"
@@ -1449,7 +1466,11 @@ def delete_cue_point(ctx: Context, bar: int = 0, beat: float = 0.0) -> str:
         ableton = get_ableton_connection()
         time_val = _convert_bar_to_beat(bar, beat)
         ableton.send_command("delete_cue_point", {"time": time_val})
-        bar_str = str(bar) if bar > 0 else "?"
+        if bar > 0:
+            bar_str = str(bar)
+        else:
+            num, denom = _get_time_signature()
+            bar_str = str(beat_to_bar(time_val, num, denom))
         if _readback_cue_absent(ableton, time_val):
             return f"Deleted cue point at bar {bar_str}"
         return (f"Delete request sent for bar {bar_str}, but cue still "
@@ -1850,10 +1871,16 @@ def get_device_parameters(
             groups.setdefault(cat, []).append(p)
 
         lines = ["{0} — {1} parameters total".format(device_name, param_count), ""]
-        for cat_name, cat_params in groups.items():
-            lines.append("  {0}: {1} parameters".format(cat_name, len(cat_params)))
-        lines.append("")
-        lines.append("Use category='<name>' or show_all=True for full details.")
+        if len(groups) == 1:
+            # Only one bucket — categorization isn't informative for this device
+            # (typically: device has no defined category prefixes, or all params
+            # share one prefix). Skip the bucket display, point at show_all.
+            lines.append("Use show_all=True for full parameter details.")
+        else:
+            for cat_name, cat_params in groups.items():
+                lines.append("  {0}: {1} parameters".format(cat_name, len(cat_params)))
+            lines.append("")
+            lines.append("Use category='<name>' or show_all=True for full details.")
         return "\n".join(lines)
     except Exception as e:
         logger.error(f"Error getting device parameters: {str(e)}")
@@ -1864,21 +1891,22 @@ def get_device_parameters(
 def set_device_parameter(
     ctx: Context,
     track_index: int,
+    value: float,
     device_index: int = 1,
     chain_index: int = 0,
     parameter_name: str = "",
     parameter_index: int = 0,
-    value: float = 0.0,
 ) -> str:
     """Set a device parameter value.
 
     Parameters:
     - track_index: Track number (1-based).
+    - value: Normalized value 0.0-1.0 (required — pass as ``value=``, not
+      a synonym like ``normalized_value=``).
     - device_index: Device number (1-based, default 1).
     - chain_index: Chain number inside a rack (1-based, 0 = no chain).
     - parameter_name: Parameter name, friendly alias, or partial match.
     - parameter_index: Parameter number (1-based, alternative to name).
-    - value: Normalized value 0.0-1.0.
     """
     try:
         ableton = get_ableton_connection()
@@ -2231,6 +2259,11 @@ def navigate_device_preset(
     direction: str = "next",
 ) -> str:
     """Navigate device presets (next/previous/current).
+
+    Note: only plugin (VST/AU) devices expose presets via this API. Stock
+    Live devices (Operator, Drum Rack, etc.) will return
+    ``Device 'X' has no presets available``; load their factory patches via
+    the browser instead (``load_instrument_or_effect`` / ``load_drum_kit``).
 
     Parameters:
     - track_index: Track number (1-based).

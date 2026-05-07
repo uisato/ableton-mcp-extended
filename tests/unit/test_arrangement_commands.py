@@ -175,6 +175,35 @@ class TestJumpToCuePointCommand:
         mock_ableton.send_command.assert_called_with(
             "jump_to_cue", {"name": "Verse"})
 
+    @patch('MCP_Server.server._get_time_signature', return_value=(4, 4))
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_response_does_not_leak_dict(self, mock_conn, mock_ts):
+        # Response must not be a string-formatted dict like "{'time': 16.0}"
+        mock_ableton = MagicMock()
+        mock_ableton.send_command.return_value = {"direction": "next", "time": 16.0}
+        mock_conn.return_value = mock_ableton
+
+        from MCP_Server.server import jump_to_cue_point
+        result = jump_to_cue_point(MagicMock(), direction="next")
+
+        assert "{'" not in result and "}" not in result
+        assert "next" in result
+        assert "bar 5" in result  # beat 16 in 4/4 = bar 5
+
+    @patch('MCP_Server.server._get_time_signature', return_value=(4, 4))
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_response_includes_name_and_bar(self, mock_conn, mock_ts):
+        mock_ableton = MagicMock()
+        mock_ableton.send_command.return_value = {"name": "Verse", "time": 8.0}
+        mock_conn.return_value = mock_ableton
+
+        from MCP_Server.server import jump_to_cue_point
+        result = jump_to_cue_point(MagicMock(), name="Verse")
+
+        assert "Verse" in result
+        assert "bar 3" in result  # beat 8 in 4/4 = bar 3
+        assert "{" not in result
+
 
 class TestCreateCuePointCommand:
     """Test create/delete cue point commands."""
@@ -238,6 +267,19 @@ class TestCreateCuePointCommand:
 
         assert "not applied" not in result
         assert "bar 5" in result
+
+    @patch('MCP_Server.server._get_time_signature', return_value=(4, 4))
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_create_without_bar_derives_bar_from_beat(self, mock_conn, mock_ts):
+        # Calling create_cue_point(beat=12.0) without bar should report bar 4
+        # (beat 12 in 4/4 = bar 4) instead of "at bar ?".
+        self._wire(mock_conn, [{"time": 12.0, "name": "1"}])
+
+        from MCP_Server.server import create_cue_point
+        result = create_cue_point(MagicMock(), beat=12.0)
+
+        assert "bar 4" in result
+        assert "?" not in result
 
     @patch('MCP_Server.server._get_time_signature', return_value=(4, 4))
     @patch('MCP_Server.server.get_ableton_connection')
