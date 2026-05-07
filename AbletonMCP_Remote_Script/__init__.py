@@ -1362,7 +1362,10 @@ class AbletonMCP(ControlSurface):
 
             create_midi_clip = getattr(track, "create_midi_clip", None)
             if create_midi_clip is not None:
-                new_clip = create_midi_clip(position, length)
+                # Live 12: LOM does not document a return value for
+                # Track.create_midi_clip, so don't trust it — scan instead.
+                create_midi_clip(position, length)
+                new_clip = None
             else:
                 new_clip = self._create_arrangement_clip_via_session(track, position, length)
 

@@ -282,6 +282,13 @@ def _full_slot():
     return slot
 
 
+def _wire_live12_create(track, new_clip):
+    """Make track.create_midi_clip() append new_clip to arrangement_clips,
+    matching Live 12's actual side effect."""
+    track.create_midi_clip.side_effect = (
+        lambda *_: track.arrangement_clips.append(new_clip))
+
+
 class TestCreateArrangementClipLive12:
     def test_calls_create_midi_clip_with_start_and_length(self):
         track = _Live12Track()
@@ -296,7 +303,7 @@ class TestCreateArrangementClipLive12:
         new_clip = MagicMock()
         new_clip.start_time = 8.0
         new_clip.end_time = 12.0
-        track.create_midi_clip.return_value = new_clip
+        _wire_live12_create(track, new_clip)
         script = _make_script([track])
 
         script._create_arrangement_clip(
@@ -310,13 +317,31 @@ class TestCreateArrangementClipLive12:
         new_clip.start_time = 0.0
         new_clip.end_time = 4.0
         new_clip.name = "Original"
-        track.create_midi_clip.return_value = new_clip
+        _wire_live12_create(track, new_clip)
         script = _make_script([track])
 
         script._create_arrangement_clip(
             track_index=0, position=0.0, length=4.0, name="")
 
         assert new_clip.name == "Original"
+
+    def test_finds_clip_via_scan_when_create_returns_none(self):
+        track = _Live12Track()
+        new_clip = MagicMock()
+        new_clip.start_time = 4.0
+        new_clip.end_time = 8.0
+        # Live 12's create_midi_clip return value is unspecified by the LOM —
+        # explicitly return None and confirm the scan still picks up the clip.
+        def _create(*_):
+            track.arrangement_clips.append(new_clip)
+            return None
+        track.create_midi_clip.side_effect = _create
+        script = _make_script([track])
+
+        script._create_arrangement_clip(
+            track_index=0, position=4.0, length=4.0, name="Verse")
+
+        assert new_clip.name == "Verse"
 
 
 class TestCreateArrangementClipLive11Fallback:
