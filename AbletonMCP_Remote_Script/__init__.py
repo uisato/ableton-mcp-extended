@@ -7,6 +7,7 @@ import json
 import threading
 import time
 import traceback
+from collections import Counter
 
 # Change queue import for Python 2
 try:
@@ -317,7 +318,8 @@ class AbletonMCP(ControlSurface):
                             ti = params.get("track_index", 0)
                             pos = params.get("position", 0.0)
                             length = params.get("length", 4.0)
-                            result = self._create_arrangement_clip(ti, pos, length)
+                            name = params.get("name", "")
+                            result = self._create_arrangement_clip(ti, pos, length, name=name)
                         elif command_type == "create_arrangement_audio_clip":
                             ti = params.get("track_index", 0)
                             pos = params.get("position", 0.0)
@@ -348,10 +350,11 @@ class AbletonMCP(ControlSurface):
                             result = self._control_arrangement_view(action, ti)
                         elif command_type == "manage_clip_automation":
                             ti = params.get("track_index", 0)
-                            ci = params.get("clip_index", 0)
+                            ci = params.get("clip_index", None)
+                            cn = params.get("clip_name", None)
                             action = params.get("action", "create")
                             pn = params.get("parameter_name", "")
-                            result = self._manage_clip_automation(ti, ci, action, pn)
+                            result = self._manage_clip_automation(ti, ci, action, pn, cn)
                         elif command_type == "add_notes_to_arrangement_clip":
                             ti = params.get("track_index", 0)
                             ci = params.get("clip_index", 0)
@@ -1103,15 +1106,28 @@ class AbletonMCP(ControlSurface):
             
             # Select the track
             self._song.view.selected_track = track
-            
+
+            devices_before = [d.name for d in tuple(track.devices)]
+
             # Load the item
             app.browser.load_item(item)
-            
+
+            devices_after = [d.name for d in tuple(track.devices)]
+            remaining = Counter(devices_before)
+            new_devices = []
+            for name in devices_after:
+                if remaining[name] > 0:
+                    remaining[name] -= 1
+                else:
+                    new_devices.append(name)
+
             result = {
                 "loaded": True,
                 "item_name": item.name,
                 "track_name": track.name,
-                "uri": item_uri
+                "uri": item_uri,
+                "devices_after": devices_after,
+                "new_devices": new_devices,
             }
             return result
         except Exception as e:
@@ -1207,7 +1223,7 @@ class AbletonMCP(ControlSurface):
         """Get all cue points."""
         try:
             cue_points = []
-            for cp in self._song.cue_points:
+            for cp in tuple(self._song.cue_points):
                 cue_points.append({"name": cp.name, "time": cp.time})
             return {"cue_points": cue_points}
         except Exception as e:
@@ -1250,7 +1266,7 @@ class AbletonMCP(ControlSurface):
                 self._song.jump_to_prev_cue()
                 return {"direction": "prev", "time": self._song.current_song_time}
             elif name:
-                for cp in self._song.cue_points:
+                for cp in tuple(self._song.cue_points):
                     if cp.name == name:
                         cp.jump()
                         return {"name": cp.name, "time": cp.time}
@@ -1262,18 +1278,33 @@ class AbletonMCP(ControlSurface):
             raise
 
     def _create_cue_point(self, time, name=""):
-        """Create a cue point at the given time."""
+        """Create a cue point at the given time.
+
+        If ``name`` is provided, the locator is renamed after creation;
+        rename failures are logged.
+        """
         try:
             for cp in tuple(self._song.cue_points):
                 if abs(cp.time - time) < 0.01:
                     raise ValueError("Cue point already exists at this position: " + cp.name)
             self._song.current_song_time = time
-            self._song.set_or_delete_cue()
-            if name:
-                for cp in tuple(self._song.cue_points):
-                    if abs(cp.time - time) < 0.01:
-                        cp.name = name
-                        break
+
+            def _finalize():
+                try:
+                    self._song.set_or_delete_cue()
+                    if name:
+                        for cp in tuple(self._song.cue_points):
+                            if abs(cp.time - time) < 0.01:
+                                try:
+                                    cp.name = name
+                                except (AttributeError, RuntimeError) as e:
+                                    self.log_message(
+                                        "CuePoint.name assignment failed: " + str(e))
+                                break
+                except Exception as e:
+                    self.log_message("Error finalizing cue point: " + str(e))
+
+            self.schedule_message(1, _finalize)
             return {"time": time, "name": name}
         except Exception as e:
             self.log_message("Error creating cue point: " + str(e))
@@ -1283,21 +1314,28 @@ class AbletonMCP(ControlSurface):
         """Delete a cue point at the given time."""
         try:
             found = False
-            for cp in self._song.cue_points:
+            for cp in tuple(self._song.cue_points):
                 if abs(cp.time - time) < 0.01:
                     found = True
                     break
             if not found:
                 raise ValueError("No cue point at this position")
             self._song.current_song_time = time
-            self._song.set_or_delete_cue()
+
+            def _finalize():
+                try:
+                    self._song.set_or_delete_cue()
+                except Exception as e:
+                    self.log_message("Error finalizing cue delete: " + str(e))
+
+            self.schedule_message(1, _finalize)
             return {"deleted": True}
         except Exception as e:
             self.log_message("Error deleting cue point: " + str(e))
             raise
 
     def _validate_not_return_or_master(self, track_index):
-        """Raise if track is a return or master track."""
+        """Raise if track is a return, master, or group (foldable) track."""
         track = self._song.tracks[track_index]
         # Return tracks and master track are separate in the Live API,
         # but if accessed via tracks list they are regular tracks.
@@ -1307,27 +1345,70 @@ class AbletonMCP(ControlSurface):
                 raise ValueError("Cannot create arrangement clips on return track '{0}'".format(track.name))
         if track == self._song.master_track:
             raise ValueError("Cannot create arrangement clips on master track")
+        # Group tracks are foldable. They have no usable clip_slots/arrangement_clips
+        # for our purposes — the Live 11 fallback would iterate to no avail.
+        if getattr(track, "is_foldable", False):
+            raise ValueError("Cannot create arrangement clips on group track '{0}'".format(track.name))
 
-    def _create_arrangement_clip(self, track_index, position, length):
-        """Create MIDI clip in arrangement."""
+    def _create_arrangement_clip(self, track_index, position, length, name=""):
+        """Create MIDI clip in arrangement.
+
+        Live 12 exposes Track.create_midi_clip(start_time, length) directly.
+        Live 11 has no such method, so round-trip through a session slot:
+        create_clip -> duplicate_clip_to_arrangement -> delete the session clip.
+        """
         try:
             if track_index < 0 or track_index >= len(self._song.tracks):
                 raise IndexError("Track index out of range")
             self._validate_not_return_or_master(track_index)
             track = self._song.tracks[track_index]
             overlapped = self._check_overlap(track, position, length)
-            track.create_midi_clip(position, length)
-            # Find the newly created clip
-            result = {"start_time": position, "length": length, "is_midi": True}
-            for clip in track.arrangement_clips:
-                if abs(clip.start_time - position) < 0.01:
-                    result = self._get_arrangement_clip_info(clip)
-                    break
+
+            create_midi_clip = getattr(track, "create_midi_clip", None)
+            if create_midi_clip is not None:
+                # Live 12: LOM does not document a return value for
+                # Track.create_midi_clip, so don't trust it — scan instead.
+                create_midi_clip(position, length)
+                new_clip = None
+            else:
+                new_clip = self._create_arrangement_clip_via_session(track, position, length)
+
+            if new_clip is None:
+                for clip in tuple(track.arrangement_clips):
+                    if abs(clip.start_time - position) < 0.01:
+                        new_clip = clip
+                        break
+
+            if new_clip is not None and name:
+                new_clip.name = name
+
+            if new_clip is not None:
+                result = self._get_arrangement_clip_info(new_clip)
+            else:
+                result = {"start_time": position, "length": length, "is_midi": True}
             result["overlapped_clips"] = overlapped
             return result
         except Exception as e:
             self.log_message("Error creating arrangement clip: " + str(e))
             raise
+
+    def _create_arrangement_clip_via_session(self, track, position, length):
+        slot_index = -1
+        for i, slot in enumerate(track.clip_slots):
+            if not slot.has_clip:
+                slot_index = i
+                break
+        if slot_index < 0:
+            raise RuntimeError(
+                "No empty session clip slot available on track '{0}'; "
+                "Live 11 needs one free slot to stage an arrangement MIDI clip".format(
+                    getattr(track, "name", "?")))
+        slot = track.clip_slots[slot_index]
+        slot.create_clip(length)
+        try:
+            return track.duplicate_clip_to_arrangement(slot.clip, position)
+        finally:
+            slot.delete_clip()
 
     def _create_arrangement_audio_clip(self, track_index, position, file_path):
         """Create audio clip in arrangement from file."""
@@ -1459,39 +1540,16 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error controlling arrangement view: " + str(e))
             raise
 
-    def _manage_clip_automation(self, track_index, clip_index, action, parameter_name=""):
-        """Create or clear automation envelopes."""
+    def _manage_clip_automation(self, track_index, clip_index, action,
+                                parameter_name="", clip_name=None):
+        """Create or clear automation envelopes on a session clip."""
         try:
-            track, clip = self._resolve_arrangement_clip(track_index, clip_index)
+            track, clip = self._resolve_session_clip(
+                track_index, clip_index, clip_name)
             if action == "clear_all":
                 clip.clear_all_envelopes()
                 return {"action": "clear_all", "done": True}
-            # Find the parameter
-            param = None
-            # Check mixer device first
-            mixer = track.mixer_device
-            for p in [mixer.volume, mixer.panning]:
-                if p.name.lower() == parameter_name.lower():
-                    param = p
-                    break
-            # Check sends
-            if param is None:
-                for send in mixer.sends:
-                    if send.name.lower() == parameter_name.lower():
-                        param = send
-                        break
-            # Check track devices
-            if param is None:
-                for device in track.devices:
-                    for p in device.parameters:
-                        if p.name.lower() == parameter_name.lower():
-                            param = p
-                            break
-                    if param:
-                        break
-            if param is None:
-                raise ValueError("Parameter '{0}' not found on track '{1}'".format(
-                    parameter_name, track.name))
+            param = self._find_automatable_parameter(track, parameter_name)
             if action == "create":
                 clip.create_automation_envelope(param)
                 return {"action": "create", "parameter": param.name, "done": True}
@@ -1503,6 +1561,63 @@ class AbletonMCP(ControlSurface):
         except Exception as e:
             self.log_message("Error managing clip automation: " + str(e))
             raise
+
+    def _resolve_session_clip(self, track_index, clip_index=None, clip_name=None):
+        """Resolve a session clip by slot index or clip name."""
+        if track_index < 0 or track_index >= len(self._song.tracks):
+            raise IndexError("Track index {0} out of range (0-{1})".format(
+                track_index, len(self._song.tracks) - 1))
+        track = self._song.tracks[track_index]
+        slots = tuple(track.clip_slots)
+
+        if clip_name:
+            matches = [(i, s.clip) for i, s in enumerate(slots)
+                       if s.has_clip and s.clip.name == clip_name]
+            if not matches:
+                raise ValueError("No session clip named '{0}' on track '{1}'".format(
+                    clip_name, track.name))
+            if len(matches) > 1:
+                raise ValueError("Ambiguous: {0} session clips named '{1}' on track '{2}'".format(
+                    len(matches), clip_name, track.name))
+            return track, matches[0][1]
+
+        if clip_index is None:
+            raise ValueError("Either clip_index or clip_name must be provided")
+        if clip_index < 0 or clip_index >= len(slots):
+            raise IndexError("Clip slot {0} out of range (0-{1}) on track '{2}'".format(
+                clip_index, len(slots) - 1, track.name))
+        slot = slots[clip_index]
+        if not slot.has_clip:
+            raise ValueError("No clip in session slot {0} on track '{1}'".format(
+                clip_index, track.name))
+        return track, slot.clip
+
+    def _find_automatable_parameter(self, track, parameter_name):
+        """Find a parameter on a track by name, with mixer-volume/pan aliases."""
+        if not parameter_name:
+            raise ValueError("parameter_name is required")
+        target = parameter_name.strip().lower()
+        mixer = track.mixer_device
+
+        aliases = {
+            "volume": mixer.volume,
+            "track volume": mixer.volume,
+            "pan": mixer.panning,
+            "panning": mixer.panning,
+            "track panning": mixer.panning,
+        }
+        if target in aliases:
+            return aliases[target]
+
+        for send in tuple(mixer.sends):
+            if send.name.strip().lower() == target:
+                return send
+        for device in tuple(track.devices):
+            for p in tuple(device.parameters):
+                if p.name.strip().lower() == target:
+                    return p
+        raise ValueError("Parameter '{0}' not found on track '{1}'".format(
+            parameter_name, track.name))
 
     # ── Device command handlers ──────────────────────────────────────
 
@@ -1954,85 +2069,81 @@ class AbletonMCP(ControlSurface):
             result = {
                 "type": category_type,
                 "categories": [],
-                "available_categories": browser_attrs
+                "available_categories": browser_attrs,
+                "total_folders": 0,
             }
-            
-            # Helper function to process a browser item and its children
-            def process_item(item, depth=0):
+
+            max_depth = 2
+            max_children = 25
+
+            def process_item(item, depth=0, parent_path="", name_override=None):
                 if not item:
-                    return None
-                
-                result = {
-                    "name": item.name if hasattr(item, 'name') else "Unknown",
-                    "is_folder": hasattr(item, 'children') and bool(item.children),
+                    return None, 0
+
+                name = name_override if name_override is not None else (
+                    item.name if hasattr(item, 'name') else "Unknown"
+                )
+                children_iter = tuple(item.children) if hasattr(item, 'children') else ()
+                is_folder = bool(children_iter)
+                item_path = (parent_path + "/" + name) if parent_path else name
+
+                node = {
+                    "name": name,
+                    "is_folder": is_folder,
                     "is_device": hasattr(item, 'is_device') and item.is_device,
                     "is_loadable": hasattr(item, 'is_loadable') and item.is_loadable,
                     "uri": item.uri if hasattr(item, 'uri') else None,
-                    "children": []
+                    "path": item_path,
+                    "children": [],
+                    "has_more": False,
                 }
-                
-                
-                return result
-            
-            # Process based on category type and available attributes
-            if (category_type == "all" or category_type == "instruments") and hasattr(app.browser, 'instruments'):
+                folder_count = 1 if is_folder else 0
+
+                if is_folder and depth < max_depth:
+                    visible = children_iter[:max_children]
+                    if len(children_iter) > max_children:
+                        node["has_more"] = True
+                    for child in visible:
+                        child_node, child_folders = process_item(child, depth + 1, item_path)
+                        if child_node:
+                            node["children"].append(child_node)
+                            folder_count += child_folders
+                elif is_folder and depth >= max_depth:
+                    node["has_more"] = True
+
+                return node, folder_count
+
+            def _append_category(attr, display_name):
                 try:
-                    instruments = process_item(app.browser.instruments)
-                    if instruments:
-                        instruments["name"] = "Instruments"  # Ensure consistent naming
-                        result["categories"].append(instruments)
+                    root_item = getattr(app.browser, attr, None)
+                    if root_item is None:
+                        return
+                    node, folder_count = process_item(root_item, name_override=display_name)
+                    if node is None:
+                        return
+                    result["categories"].append(node)
+                    result["total_folders"] += folder_count
                 except Exception as e:
-                    self.log_message("Error processing instruments: {0}".format(str(e)))
-            
-            if (category_type == "all" or category_type == "sounds") and hasattr(app.browser, 'sounds'):
-                try:
-                    sounds = process_item(app.browser.sounds)
-                    if sounds:
-                        sounds["name"] = "Sounds"  # Ensure consistent naming
-                        result["categories"].append(sounds)
-                except Exception as e:
-                    self.log_message("Error processing sounds: {0}".format(str(e)))
-            
-            if (category_type == "all" or category_type == "drums") and hasattr(app.browser, 'drums'):
-                try:
-                    drums = process_item(app.browser.drums)
-                    if drums:
-                        drums["name"] = "Drums"  # Ensure consistent naming
-                        result["categories"].append(drums)
-                except Exception as e:
-                    self.log_message("Error processing drums: {0}".format(str(e)))
-            
-            if (category_type == "all" or category_type == "audio_effects") and hasattr(app.browser, 'audio_effects'):
-                try:
-                    audio_effects = process_item(app.browser.audio_effects)
-                    if audio_effects:
-                        audio_effects["name"] = "Audio Effects"  # Ensure consistent naming
-                        result["categories"].append(audio_effects)
-                except Exception as e:
-                    self.log_message("Error processing audio_effects: {0}".format(str(e)))
-            
-            if (category_type == "all" or category_type == "midi_effects") and hasattr(app.browser, 'midi_effects'):
-                try:
-                    midi_effects = process_item(app.browser.midi_effects)
-                    if midi_effects:
-                        midi_effects["name"] = "MIDI Effects"
-                        result["categories"].append(midi_effects)
-                except Exception as e:
-                    self.log_message("Error processing midi_effects: {0}".format(str(e)))
-            
-            # Try to process other potentially available categories
+                    self.log_message("Error processing {0}: {1}".format(attr, str(e)))
+
+            named_categories = [
+                ("instruments", "Instruments"),
+                ("sounds", "Sounds"),
+                ("drums", "Drums"),
+                ("audio_effects", "Audio Effects"),
+                ("midi_effects", "MIDI Effects"),
+            ]
+            for attr, display_name in named_categories:
+                if (category_type == "all" or category_type == attr) and hasattr(app.browser, attr):
+                    _append_category(attr, display_name)
+
+            handled = {attr for attr, _ in named_categories}
             for attr in browser_attrs:
-                if attr not in ['instruments', 'sounds', 'drums', 'audio_effects', 'midi_effects'] and \
-                   (category_type == "all" or category_type == attr):
-                    try:
-                        item = getattr(app.browser, attr)
-                        if hasattr(item, 'children') or hasattr(item, 'name'):
-                            category = process_item(item)
-                            if category:
-                                category["name"] = attr.capitalize()
-                                result["categories"].append(category)
-                    except Exception as e:
-                        self.log_message("Error processing {0}: {1}".format(attr, str(e)))
+                if attr in handled:
+                    continue
+                if category_type != "all" and category_type != attr:
+                    continue
+                _append_category(attr, attr.capitalize())
             
             self.log_message("Browser tree generated for {0} with {1} root categories".format(
                 category_type, len(result['categories'])))

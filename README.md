@@ -234,6 +234,7 @@ This project includes several specialized components:
 
 - **[Installation Guide](INSTALLATION.md)** - Detailed setup instructions
 - **[User Guide](README.md)** - What, which, and how  
+- **[Live 11 Compatibility Notes](LIVE_11_NOTES.md)** - End-user behavior differences vs. Live 12
 
 ---
 

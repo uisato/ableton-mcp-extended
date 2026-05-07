@@ -91,6 +91,35 @@ class TestGetDeviceParameters:
         call_args = mock_ableton.send_command.call_args
         assert call_args[0][1]["chain_index"] == 1  # 2 - 1
 
+    @patch('MCP_Server.server.get_categories', return_value={})
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_summary_drops_bucket_when_only_one_category(self, mock_conn, _mock_cats):
+        # When categorization yields one bucket (e.g. all "Other" because the
+        # device has no defined prefixes), don't print "Other: N parameters" —
+        # it's noise. Drop it and just point at show_all.
+        mock_ableton = MagicMock()
+        mock_ableton.send_command.return_value = {
+            "device_name": "Operator",
+            "device_class": "Operator",
+            "parameter_count": 3,
+            "parameters": [
+                {"index": 0, "name": "Foo", "value": 0.0, "min": 0.0, "max": 1.0,
+                 "display_value": "0", "is_enabled": True, "is_quantized": False,
+                 "value_items": []},
+                {"index": 1, "name": "Bar", "value": 0.0, "min": 0.0, "max": 1.0,
+                 "display_value": "0", "is_enabled": True, "is_quantized": False,
+                 "value_items": []},
+                {"index": 2, "name": "Baz", "value": 0.0, "min": 0.0, "max": 1.0,
+                 "display_value": "0", "is_enabled": True, "is_quantized": False,
+                 "value_items": []},
+            ],
+        }
+        mock_conn.return_value = mock_ableton
+
+        result = get_device_parameters(MagicMock(), track_index=1)
+        assert "Other:" not in result
+        assert "show_all=True" in result
+
 
 class TestSetDeviceParameter:
     """Test set_device_parameter tool."""
@@ -157,6 +186,17 @@ class TestSetDeviceParameter:
         second_call = mock_ableton.send_command.call_args_list[1]
         assert second_call[0][1]["parameter_name"] == "Osc A WT Pos"
         assert "alias" in result
+
+    def test_value_is_required(self):
+        # Calling without value should fail with TypeError — guards against
+        # silent default-to-0.0 when an LLM uses a synonym like
+        # ``normalized_value=`` and the unknown kwarg gets dropped.
+        try:
+            set_device_parameter(MagicMock(), track_index=1, parameter_index=5)
+        except TypeError as e:
+            assert "value" in str(e).lower()
+        else:
+            raise AssertionError("expected TypeError when 'value' is omitted")
 
 
 class TestEnableDisableDevice:

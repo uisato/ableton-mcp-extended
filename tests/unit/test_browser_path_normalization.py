@@ -126,6 +126,97 @@ def test_get_browser_items_at_path_normalizes_vst_alias_to_plugins():
     assert result["items"][0]["name"] == "MegaSynth"
 
 
+def test_get_browser_tree_recurses_into_folder_children():
+    # Tree should expose nested folders so callers can see structure, not just root.
+    bass = _FakeItem("Bass")
+    lead = _FakeItem("Lead")
+    operator = _FakeItem("Operator", children=[bass, lead])
+    analog = _FakeItem("Analog", is_device=True, is_loadable=True)
+    instruments = _FakeItem("Instruments", children=[analog, operator])
+    browser = types.SimpleNamespace(
+        instruments=instruments,
+        sounds=_FakeItem("Sounds"),
+        drums=_FakeItem("Drums"),
+        audio_effects=_FakeItem("Audio Effects"),
+        midi_effects=_FakeItem("MIDI Effects"),
+    )
+    surface = _make_surface_with_browser(browser)
+
+    result = surface.get_browser_tree("instruments")
+
+    categories = result["categories"]
+    assert len(categories) == 1
+    root = categories[0]
+    assert root["name"] == "Instruments"
+    child_names = sorted(c["name"] for c in root["children"])
+    assert child_names == ["Analog", "Operator"]
+    operator_node = next(c for c in root["children"] if c["name"] == "Operator")
+    grandchild_names = sorted(c["name"] for c in operator_node["children"])
+    assert grandchild_names == ["Bass", "Lead"]
+
+
+def test_get_browser_tree_reports_total_folder_count():
+    # total_folders should reflect every folder node visited in the tree.
+    bass_presets = _FakeItem("Bass", children=[_FakeItem("Sub.adv", is_loadable=True)])
+    operator = _FakeItem("Operator", children=[bass_presets])
+    instruments = _FakeItem("Instruments", children=[operator, _FakeItem("Analog")])
+    browser = types.SimpleNamespace(
+        instruments=instruments,
+        sounds=_FakeItem("Sounds"),
+        drums=_FakeItem("Drums"),
+        audio_effects=_FakeItem("Audio Effects"),
+        midi_effects=_FakeItem("MIDI Effects"),
+    )
+    surface = _make_surface_with_browser(browser)
+
+    result = surface.get_browser_tree("instruments")
+
+    # Three folder nodes: Instruments, Operator, Bass. Analog and Sub.adv are leaves.
+    assert result["total_folders"] == 3
+
+
+def test_get_browser_tree_includes_navigable_path_per_node():
+    # Tree paths must be usable as input to get_browser_items_at_path.
+    bass = _FakeItem("Bass")
+    operator = _FakeItem("Operator", children=[bass])
+    instruments = _FakeItem("Instruments", children=[operator])
+    browser = types.SimpleNamespace(
+        instruments=instruments,
+        sounds=_FakeItem("Sounds"),
+        drums=_FakeItem("Drums"),
+        audio_effects=_FakeItem("Audio Effects"),
+        midi_effects=_FakeItem("MIDI Effects"),
+    )
+    surface = _make_surface_with_browser(browser)
+
+    result = surface.get_browser_tree("instruments")
+    operator_node = result["categories"][0]["children"][0]
+    bass_node = operator_node["children"][0]
+
+    assert operator_node["path"] == "Instruments/Operator"
+    assert bass_node["path"] == "Instruments/Operator/Bass"
+
+
+def test_get_browser_tree_caps_children_and_marks_has_more():
+    # Drums has hundreds of leaf children. Tree must cap and signal truncation.
+    many = [_FakeItem("Kit{0}.adg".format(i), is_loadable=True) for i in range(50)]
+    drums = _FakeItem("Drums", children=many)
+    browser = types.SimpleNamespace(
+        instruments=_FakeItem("Instruments"),
+        sounds=_FakeItem("Sounds"),
+        drums=drums,
+        audio_effects=_FakeItem("Audio Effects"),
+        midi_effects=_FakeItem("MIDI Effects"),
+    )
+    surface = _make_surface_with_browser(browser)
+
+    result = surface.get_browser_tree("drums")
+    drums_node = result["categories"][0]
+
+    assert drums_node["has_more"] is True
+    assert len(drums_node["children"]) < 50
+
+
 def test_get_browser_items_at_path_unknown_category_error_is_normalized():
     browser = types.SimpleNamespace(
         instruments=_FakeItem("Instruments"),

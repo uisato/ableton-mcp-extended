@@ -175,37 +175,152 @@ class TestJumpToCuePointCommand:
         mock_ableton.send_command.assert_called_with(
             "jump_to_cue", {"name": "Verse"})
 
+    @patch('MCP_Server.server._get_time_signature', return_value=(4, 4))
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_response_does_not_leak_dict(self, mock_conn, mock_ts):
+        # Response must not be a string-formatted dict like "{'time': 16.0}"
+        mock_ableton = MagicMock()
+        mock_ableton.send_command.return_value = {"direction": "next", "time": 16.0}
+        mock_conn.return_value = mock_ableton
+
+        from MCP_Server.server import jump_to_cue_point
+        result = jump_to_cue_point(MagicMock(), direction="next")
+
+        assert "{'" not in result and "}" not in result
+        assert "next" in result
+        assert "bar 5" in result  # beat 16 in 4/4 = bar 5
+
+    @patch('MCP_Server.server._get_time_signature', return_value=(4, 4))
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_response_includes_name_and_bar(self, mock_conn, mock_ts):
+        mock_ableton = MagicMock()
+        mock_ableton.send_command.return_value = {"name": "Verse", "time": 8.0}
+        mock_conn.return_value = mock_ableton
+
+        from MCP_Server.server import jump_to_cue_point
+        result = jump_to_cue_point(MagicMock(), name="Verse")
+
+        assert "Verse" in result
+        assert "bar 3" in result  # beat 8 in 4/4 = bar 3
+        assert "{" not in result
+
 
 class TestCreateCuePointCommand:
     """Test create/delete cue point commands."""
 
+    @staticmethod
+    def _wire(mock_conn, readback_cues):
+        mock_ableton = MagicMock()
+        def send(cmd, _params=None):
+            if cmd == "get_cue_points":
+                return {"cue_points": readback_cues}
+            return {}
+        mock_ableton.send_command.side_effect = send
+        mock_conn.return_value = mock_ableton
+        return mock_ableton
+
     @patch('MCP_Server.server._get_time_signature', return_value=(4, 4))
     @patch('MCP_Server.server.get_ableton_connection')
-    def test_create_at_bar(self, mock_conn, mock_ts):
+    def test_create_at_bar_sends_correct_params(self, mock_conn, mock_ts):
         # Creating a cue point at bar 5 should convert to beat 16.0 and include the name
-        mock_ableton = MagicMock()
-        mock_ableton.send_command.return_value = {}
-        mock_conn.return_value = mock_ableton
+        mock_ableton = self._wire(mock_conn, [{"time": 16.0, "name": "Bridge"}])
 
         from MCP_Server.server import create_cue_point
         create_cue_point(MagicMock(), bar=5, name="Bridge")
 
-        mock_ableton.send_command.assert_called_with(
+        mock_ableton.send_command.assert_any_call(
             "create_cue_point", {"time": 16.0, "name": "Bridge"})
+
+    @patch('MCP_Server.server._get_time_signature', return_value=(4, 4))
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_response_uses_readback_name_when_applied(self, mock_conn, mock_ts):
+        self._wire(mock_conn, [{"time": 16.0, "name": "Bridge"}])
+
+        from MCP_Server.server import create_cue_point
+        result = create_cue_point(MagicMock(), bar=5, name="Bridge")
+
+        assert "Bridge" in result
+        assert "not applied" not in result
+        assert "bar 5" in result
+
+    @patch('MCP_Server.server._get_time_signature', return_value=(4, 4))
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_response_warns_when_name_not_applied(self, mock_conn, mock_ts):
+        # Live 11 returns the locator default name ("1") regardless of requested name.
+        self._wire(mock_conn, [{"time": 16.0, "name": "1"}])
+
+        from MCP_Server.server import create_cue_point
+        result = create_cue_point(MagicMock(), bar=5, name="Bridge")
+
+        assert "not applied" in result
+        assert "Bridge" in result
+        assert "'1'" in result
+        assert "bar 5" in result
+
+    @patch('MCP_Server.server._get_time_signature', return_value=(4, 4))
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_response_no_name_requested_uses_actual(self, mock_conn, mock_ts):
+        self._wire(mock_conn, [{"time": 16.0, "name": "1"}])
+
+        from MCP_Server.server import create_cue_point
+        result = create_cue_point(MagicMock(), bar=5, name="")
+
+        assert "not applied" not in result
+        assert "bar 5" in result
+
+    @patch('MCP_Server.server._get_time_signature', return_value=(4, 4))
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_create_without_bar_derives_bar_from_beat(self, mock_conn, mock_ts):
+        # Calling create_cue_point(beat=12.0) without bar should report bar 4
+        # (beat 12 in 4/4 = bar 4) instead of "at bar ?".
+        self._wire(mock_conn, [{"time": 12.0, "name": "1"}])
+
+        from MCP_Server.server import create_cue_point
+        result = create_cue_point(MagicMock(), beat=12.0)
+
+        assert "bar 4" in result
+        assert "?" not in result
+
+    @patch('MCP_Server.server._get_time_signature', return_value=(4, 4))
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_falls_back_when_readback_finds_nothing(self, mock_conn, mock_ts):
+        # If the readback can't find the cue (race/failure), don't lie about state — fall back.
+        self._wire(mock_conn, [])
+
+        from MCP_Server.server import create_cue_point
+        result = create_cue_point(MagicMock(), bar=5, name="Bridge")
+
+        assert "bar 5" in result
+        # No false "name applied" claim and no false "not applied" claim either.
 
     @patch('MCP_Server.server._get_time_signature', return_value=(4, 4))
     @patch('MCP_Server.server.get_ableton_connection')
     def test_delete_at_bar(self, mock_conn, mock_ts):
         # Deleting a cue point at bar 5 should convert to beat 16.0
-        mock_ableton = MagicMock()
-        mock_ableton.send_command.return_value = {}
-        mock_conn.return_value = mock_ableton
+        mock_ableton = self._wire(mock_conn, [])  # readback sees no cue → success
 
         from MCP_Server.server import delete_cue_point
-        delete_cue_point(MagicMock(), bar=5)
+        result = delete_cue_point(MagicMock(), bar=5)
 
-        mock_ableton.send_command.assert_called_with(
+        mock_ableton.send_command.assert_any_call(
             "delete_cue_point", {"time": 16.0})
+        assert "Deleted" in result
+        assert "bar 5" in result
+
+    @patch('MCP_Server.server._get_time_signature', return_value=(4, 4))
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_delete_warns_when_readback_still_finds_cue(self, mock_conn, mock_ts):
+        # If the deferred set_or_delete_cue hasn't resolved (or it failed),
+        # the cue is still present after the retry budget. Surface that
+        # honestly rather than claiming success.
+        self._wire(mock_conn, [{"time": 16.0, "name": "1"}])
+
+        from MCP_Server.server import delete_cue_point
+        with patch('time.sleep'):  # skip retry sleeps
+            result = delete_cue_point(MagicMock(), bar=5)
+
+        assert "still" in result.lower()
+        assert "bar 5" in result
 
 
 class TestCreateArrangementMidiClipCommand:
@@ -229,6 +344,20 @@ class TestCreateArrangementMidiClipCommand:
         assert args[0][1]["track_index"] == 0  # 1-based → 0-based
         assert args[0][1]["position"] == 16.0
         assert args[0][1]["length"] == 16.0
+
+    @patch('MCP_Server.server._get_time_signature', return_value=(4, 4))
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_passes_name_through(self, mock_conn, mock_ts):
+        mock_ableton = MagicMock()
+        mock_ableton.send_command.return_value = {"overlapped_clips": []}
+        mock_conn.return_value = mock_ableton
+
+        from MCP_Server.server import create_arrangement_midi_clip
+        create_arrangement_midi_clip(
+            MagicMock(), track_index=1, start_bar=1, end_bar=5, name="Intro")
+
+        args = mock_ableton.send_command.call_args
+        assert args[0][1]["name"] == "Intro"
 
     @patch('MCP_Server.server._get_time_signature', return_value=(4, 4))
     @patch('MCP_Server.server.get_ableton_connection')
@@ -461,3 +590,51 @@ class TestManageClipAutomationCommand:
             MagicMock(), track_index=1, clip_index=1, action="clear_all")
 
         assert "Cleared all" in result
+
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_clip_name_forwarded_and_takes_precedence(self, mock_conn):
+        # clip_name must be forwarded; clip_index must NOT be sent so the
+        # Remote Script resolves by name unambiguously.
+        mock_ableton = MagicMock()
+        mock_ableton.send_command.return_value = {"action": "create", "done": True}
+        mock_conn.return_value = mock_ableton
+
+        from MCP_Server.server import manage_clip_automation
+        manage_clip_automation(
+            MagicMock(), track_index=2, clip_index=4, clip_name="Lead",
+            action="create", parameter_name="volume")
+
+        payload = mock_ableton.send_command.call_args[0][1]
+        assert payload["clip_name"] == "Lead"
+        assert "clip_index" not in payload
+        assert payload["track_index"] == 1
+
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_remote_parameter_name_surfaces_in_message(self, mock_conn):
+        # Server must not fabricate the parameter — it should reflect what
+        # the Remote Script reports (e.g. "Track Volume" for an alias).
+        mock_ableton = MagicMock()
+        mock_ableton.send_command.return_value = {
+            "action": "create", "parameter": "Track Volume", "done": True}
+        mock_conn.return_value = mock_ableton
+
+        from MCP_Server.server import manage_clip_automation
+        result = manage_clip_automation(
+            MagicMock(), track_index=1, clip_index=1,
+            action="create", parameter_name="volume")
+
+        assert "Track Volume" in result
+
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_zero_clip_index_without_name_errors(self, mock_conn):
+        # 0 violates the 1-based contract; reject before round-tripping.
+        mock_ableton = MagicMock()
+        mock_conn.return_value = mock_ableton
+
+        from MCP_Server.server import manage_clip_automation
+        result = manage_clip_automation(
+            MagicMock(), track_index=1, clip_index=0,
+            action="create", parameter_name="volume")
+
+        assert "Error" in result
+        mock_ableton.send_command.assert_not_called()

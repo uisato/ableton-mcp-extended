@@ -1,4 +1,9 @@
-# ableton_mcp_server.py
+import os
+import sys
+
+if __package__ in (None, ""):
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from mcp.server.fastmcp import FastMCP, Context
 import socket
 import json
@@ -9,6 +14,12 @@ import time
 from dataclasses import dataclass
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Dict, Any, List, Union
+
+from MCP_Server.plugin_aliases import (
+    get_alias_for_param,
+    get_categories,
+    resolve_alias,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -404,6 +415,15 @@ def get_track_info(ctx: Context, track_index: int) -> str:
         ableton = get_ableton_connection()
         ti = _to_zero_based(track_index, "track_index")
         result = ableton.send_command("get_track_info", {"track_index": ti})
+        if isinstance(result, dict):
+            if isinstance(result.get("index"), int):
+                result["index"] = result["index"] + 1
+            for key in ("clip_slots", "devices"):
+                items = result.get(key)
+                if isinstance(items, list):
+                    for item in items:
+                        if isinstance(item, dict) and isinstance(item.get("index"), int):
+                            item["index"] = item["index"] + 1
         return json.dumps(result, indent=2)
     except Exception as e:
         logger.error(f"Error getting track info from Ableton: {str(e)}")
@@ -653,14 +673,17 @@ def load_instrument_or_effect(ctx: Context, track_index: int, uri: str) -> str:
             "item_uri": uri
         })
         
-        # Check if the instrument was loaded successfully
         if result.get("loaded", False):
             new_devices = result.get("new_devices", [])
             if new_devices:
                 return f"Loaded instrument with URI '{uri}' on track {track_index}. New devices: {', '.join(new_devices)}"
-            else:
-                devices = result.get("devices_after", [])
+            devices = result.get("devices_after", [])
+            if devices:
                 return f"Loaded instrument with URI '{uri}' on track {track_index}. Devices on track: {', '.join(devices)}"
+            item_name = result.get("item_name", "")
+            if item_name:
+                return f"Loaded '{item_name}' on track {track_index}."
+            return f"Loaded instrument with URI '{uri}' on track {track_index}."
         else:
             return f"Failed to load instrument with URI '{uri}'"
     except Exception as e:
@@ -1105,6 +1128,13 @@ def load_external_plugin(
         return f"Error loading external plugin: {str(e)}"
 
 
+_BROWSER_URI_SCHEME_RE = re.compile(r"^[a-z][a-z0-9.+-]*:")
+
+
+def _looks_like_browser_uri(value: str) -> bool:
+    return isinstance(value, str) and bool(_BROWSER_URI_SCHEME_RE.match(value))
+
+
 @mcp.tool()
 def load_drum_kit(ctx: Context, track_index: int, rack_uri: str, kit_path: str) -> str:
     """
@@ -1112,45 +1142,51 @@ def load_drum_kit(ctx: Context, track_index: int, rack_uri: str, kit_path: str) 
 
     Parameters:
     - track_index: Track number (1-based).
-    - rack_uri: The URI of the drum rack to load (e.g., 'Drums/Drum Rack').
-    - kit_path: Path to the drum kit inside the browser (e.g., 'drums/acoustic/kit1').
+    - rack_uri: Browser URI of the drum rack (e.g., 'query:Drums#Drum%20Rack').
+    - kit_path: Either a browser URI of the kit (e.g., 'query:Drums#FileId_4197')
+                or a browser path. Stock kits live as .adg leaves directly under
+                'drums', e.g. 'drums/808 Core Kit.adg'. Folder paths fall back
+                to loading the first loadable child (e.g. 'user-library/My Kits').
     """
     try:
         ableton = get_ableton_connection()
         ti = _to_zero_based(track_index, "track_index")
 
-        # Step 1: Load the drum rack
-        result = ableton.send_command("load_browser_item", {
+        rack_result = ableton.send_command("load_browser_item", {
             "track_index": ti,
-            "item_uri": rack_uri
+            "item_uri": rack_uri,
         })
-        
-        if not result.get("loaded", False):
+        if not rack_result.get("loaded", False):
             return f"Failed to load drum rack with URI '{rack_uri}'"
-        
-        # Step 2: Get the drum kit items at the specified path
-        kit_result = ableton.send_command("get_browser_items_at_path", {
-            "path": kit_path
-        })
-        
-        if "error" in kit_result:
-            return f"Loaded drum rack but failed to find drum kit: {kit_result.get('error')}"
-        
-        # Step 3: Find a loadable drum kit
-        kit_items = kit_result.get("items", [])
-        loadable_kits = [item for item in kit_items if item.get("is_loadable", False)]
-        
-        if not loadable_kits:
-            return f"Loaded drum rack but no loadable drum kits found at '{kit_path}'"
-        
-        # Step 4: Load the first loadable kit
-        kit_uri = loadable_kits[0].get("uri")
-        load_result = ableton.send_command("load_browser_item", {
+
+        if _looks_like_browser_uri(kit_path):
+            kit_uri = kit_path
+            kit_name = kit_path
+        else:
+            kit_result = ableton.send_command("get_browser_items_at_path", {
+                "path": kit_path,
+            })
+            if "error" in kit_result:
+                return f"Loaded drum rack but failed to find drum kit: {kit_result.get('error')}"
+
+            if kit_result.get("is_loadable") and kit_result.get("uri"):
+                kit_uri = kit_result["uri"]
+                kit_name = kit_result.get("name") or kit_path
+            else:
+                loadable_kits = [
+                    item for item in kit_result.get("items", [])
+                    if item.get("is_loadable", False)
+                ]
+                if not loadable_kits:
+                    return f"Loaded drum rack but no loadable drum kits found at '{kit_path}'"
+                kit_uri = loadable_kits[0].get("uri")
+                kit_name = loadable_kits[0].get("name")
+
+        ableton.send_command("load_browser_item", {
             "track_index": ti,
-            "item_uri": kit_uri
+            "item_uri": kit_uri,
         })
-        
-        return f"Loaded drum rack and kit '{loadable_kits[0].get('name')}' on track {track_index}"
+        return f"Loaded drum rack and kit '{kit_name}' on track {track_index}"
     except Exception as e:
         logger.error(f"Error loading drum kit: {str(e)}")
         return f"Error loading drum kit: {str(e)}"
@@ -1329,10 +1365,61 @@ def jump_to_cue_point(ctx: Context, direction: str = "", name: str = "") -> str:
         if name:
             params["name"] = name
         result = ableton.send_command("jump_to_cue", params)
-        return f"Jumped to cue point: {result}"
+
+        landed_name = result.get("name")
+        landed_dir = result.get("direction")
+        time_val = result.get("time")
+        location = ""
+        if time_val is not None:
+            num, denom = _get_time_signature()
+            location = f" at bar {beat_to_bar(time_val, num, denom)}"
+
+        if landed_name:
+            return f"Jumped to cue point '{landed_name}'{location}"
+        if landed_dir:
+            return f"Jumped {landed_dir} to cue point{location}"
+        return f"Jumped to cue point{location}"
     except Exception as e:
         logger.error(f"Error jumping to cue point: {str(e)}")
         return f"Error jumping to cue point: {str(e)}"
+
+
+def _readback_cue_name(ableton, time_val: float, attempts: int = 4, delay: float = 0.05):
+    """Return the actual locator name at ``time_val`` after a create.
+
+    The Remote Script defers cue creation + rename via ``schedule_message`` so
+    the remote can move the playhead first; a tight retry covers the race
+    between our follow-up read and Live's tick.
+    """
+    import time as _time
+    for i in range(attempts):
+        result = ableton.send_command("get_cue_points", {})
+        for cp in result.get("cue_points", []):
+            if abs(cp.get("time", -1) - time_val) < 0.01:
+                return cp.get("name", "")
+        if i < attempts - 1:
+            _time.sleep(delay)
+    return None
+
+
+def _readback_cue_absent(ableton, time_val: float, attempts: int = 4, delay: float = 0.05):
+    """Return True once the cue at ``time_val`` is gone after a delete.
+
+    Symmetric to ``_readback_cue_name`` — the Remote Script defers
+    ``set_or_delete_cue`` via ``schedule_message`` so the playhead set lands
+    first, and the readback covers the tick race.
+    """
+    import time as _time
+    for i in range(attempts):
+        result = ableton.send_command("get_cue_points", {})
+        present = any(
+            abs(cp.get("time", -1) - time_val) < 0.01
+            for cp in result.get("cue_points", []))
+        if not present:
+            return True
+        if i < attempts - 1:
+            _time.sleep(delay)
+    return False
 
 
 @mcp.tool()
@@ -1347,8 +1434,21 @@ def create_cue_point(ctx: Context, bar: int = 0, beat: float = 0.0, name: str = 
     try:
         ableton = get_ableton_connection()
         time_val = _convert_bar_to_beat(bar, beat)
-        result = ableton.send_command("create_cue_point", {"time": time_val, "name": name})
-        return f"Created cue point '{name}' at bar {bar if bar > 0 else '?'}"
+        ableton.send_command("create_cue_point", {"time": time_val, "name": name})
+        if bar > 0:
+            bar_str = str(bar)
+        else:
+            num, denom = _get_time_signature()
+            bar_str = str(beat_to_bar(time_val, num, denom))
+        actual_name = _readback_cue_name(ableton, time_val)
+        if actual_name is None:
+            return f"Created cue point at bar {bar_str}"
+        if name and actual_name != name:
+            return (f"Created cue point '{actual_name}' at bar {bar_str} "
+                    f"(requested name '{name}' not applied)")
+        if actual_name:
+            return f"Created cue point '{actual_name}' at bar {bar_str}"
+        return f"Created cue point at bar {bar_str}"
     except Exception as e:
         logger.error(f"Error creating cue point: {str(e)}")
         return f"Error creating cue point: {str(e)}"
@@ -1366,7 +1466,15 @@ def delete_cue_point(ctx: Context, bar: int = 0, beat: float = 0.0) -> str:
         ableton = get_ableton_connection()
         time_val = _convert_bar_to_beat(bar, beat)
         ableton.send_command("delete_cue_point", {"time": time_val})
-        return f"Deleted cue point at bar {bar if bar > 0 else '?'}"
+        if bar > 0:
+            bar_str = str(bar)
+        else:
+            num, denom = _get_time_signature()
+            bar_str = str(beat_to_bar(time_val, num, denom))
+        if _readback_cue_absent(ableton, time_val):
+            return f"Deleted cue point at bar {bar_str}"
+        return (f"Delete request sent for bar {bar_str}, but cue still "
+                f"present after readback (Live tick race)")
     except Exception as e:
         logger.error(f"Error deleting cue point: {str(e)}")
         return f"Error deleting cue point: {str(e)}"
@@ -1411,6 +1519,7 @@ def create_arrangement_midi_clip(
             "track_index": ti,
             "position": position,
             "length": length,
+            "name": name,
         })
 
         msg = (f"Created MIDI clip on track {track_index} at "
@@ -1642,29 +1751,40 @@ def manage_clip_automation(
     action: str = "create",
     parameter_name: str = "volume",
 ) -> str:
-    """Create or clear automation envelopes on arrangement clips.
+    """Create or clear automation envelopes on a session clip.
+
+    Live's Clip.create_automation_envelope only accepts session clips, so
+    this tool resolves against the track's clip_slots.
 
     Parameters:
     - track_index: Track number (1-based).
-    - clip_index: Clip position (1-based).
-    - clip_name: Clip name (alternative to clip_index).
+    - clip_index: Session clip slot (1-based). Ignored when clip_name is set.
+    - clip_name: Resolve by clip name across the track's slots.
     - action: "create", "clear", or "clear_all".
-    - parameter_name: Parameter to automate (e.g., "volume", "panning").
+    - parameter_name: Parameter to automate. Aliases "volume" and "panning"
+      map to Track Volume / Track Panning. Otherwise matched by exact
+      (case-insensitive) name against mixer sends and devices on the track.
     """
     try:
         ableton = get_ableton_connection()
         ti = _to_zero_based(track_index, "track_index")
-        ci = _to_zero_based(clip_index, "clip_index") if clip_index > 0 else 0
-        result = ableton.send_command("manage_clip_automation", {
+        payload = {
             "track_index": ti,
-            "clip_index": ci,
             "action": action,
             "parameter_name": parameter_name,
-        })
+        }
+        if clip_name:
+            payload["clip_name"] = clip_name
+        else:
+            payload["clip_index"] = _to_zero_based(clip_index, "clip_index")
 
+        result = ableton.send_command("manage_clip_automation", payload)
+
+        target = clip_name or f"slot {clip_index}"
         if action == "clear_all":
-            return f"Cleared all automation on clip {clip_index}, track {track_index}"
-        return f"Automation {action}: {parameter_name} on clip {clip_index}, track {track_index}"
+            return f"Cleared all automation on {target}, track {track_index}"
+        param = result.get("parameter", parameter_name)
+        return f"Automation {action}: {param} on {target}, track {track_index}"
     except Exception as e:
         logger.error(f"Error managing clip automation: {str(e)}")
         return f"Error managing clip automation: {str(e)}"
@@ -1694,8 +1814,6 @@ def get_device_parameters(
     Specify category or show_all=True for full parameter details.
     """
     try:
-        from MCP_Server.plugin_aliases import get_categories, get_alias_for_param
-
         ableton = get_ableton_connection()
         ti = _to_zero_based(track_index, "track_index")
         di = _to_zero_based(device_index, "device_index")
@@ -1753,10 +1871,16 @@ def get_device_parameters(
             groups.setdefault(cat, []).append(p)
 
         lines = ["{0} — {1} parameters total".format(device_name, param_count), ""]
-        for cat_name, cat_params in groups.items():
-            lines.append("  {0}: {1} parameters".format(cat_name, len(cat_params)))
-        lines.append("")
-        lines.append("Use category='<name>' or show_all=True for full details.")
+        if len(groups) == 1:
+            # Only one bucket — categorization isn't informative for this device
+            # (typically: device has no defined category prefixes, or all params
+            # share one prefix). Skip the bucket display, point at show_all.
+            lines.append("Use show_all=True for full parameter details.")
+        else:
+            for cat_name, cat_params in groups.items():
+                lines.append("  {0}: {1} parameters".format(cat_name, len(cat_params)))
+            lines.append("")
+            lines.append("Use category='<name>' or show_all=True for full details.")
         return "\n".join(lines)
     except Exception as e:
         logger.error(f"Error getting device parameters: {str(e)}")
@@ -1767,25 +1891,24 @@ def get_device_parameters(
 def set_device_parameter(
     ctx: Context,
     track_index: int,
+    value: float,
     device_index: int = 1,
     chain_index: int = 0,
     parameter_name: str = "",
     parameter_index: int = 0,
-    value: float = 0.0,
 ) -> str:
     """Set a device parameter value.
 
     Parameters:
     - track_index: Track number (1-based).
+    - value: Normalized value 0.0-1.0 (required — pass as ``value=``, not
+      a synonym like ``normalized_value=``).
     - device_index: Device number (1-based, default 1).
     - chain_index: Chain number inside a rack (1-based, 0 = no chain).
     - parameter_name: Parameter name, friendly alias, or partial match.
     - parameter_index: Parameter number (1-based, alternative to name).
-    - value: Normalized value 0.0-1.0.
     """
     try:
-        from MCP_Server.plugin_aliases import resolve_alias
-
         ableton = get_ableton_connection()
         ti = _to_zero_based(track_index, "track_index")
         di = _to_zero_based(device_index, "device_index")
@@ -2136,6 +2259,11 @@ def navigate_device_preset(
     direction: str = "next",
 ) -> str:
     """Navigate device presets (next/previous/current).
+
+    Note: only plugin (VST/AU) devices expose presets via this API. Stock
+    Live devices (Operator, Drum Rack, etc.) will return
+    ``Device 'X' has no presets available``; load their factory patches via
+    the browser instead (``load_instrument_or_effect`` / ``load_drum_kit``).
 
     Parameters:
     - track_index: Track number (1-based).

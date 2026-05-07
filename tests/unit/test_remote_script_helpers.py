@@ -71,6 +71,7 @@ class _GroupTrack:
 
 def _make_script(tracks=()):
     script = AbletonMCP.__new__(AbletonMCP)
+    script.log_message = lambda _msg: None
     script._song = MagicMock()
     script._song.tracks = list(tracks)
     script._song.return_tracks = []
@@ -130,6 +131,7 @@ class TestCreateCuePointAssignsName:
     @staticmethod
     def _wire_toggle(script, returned_cue):
         script._song.cue_points = ()
+        script.schedule_message = MagicMock(side_effect=lambda _delay, fn: fn())
 
         def toggle():
             script._song.cue_points = (returned_cue,)
@@ -157,3 +159,242 @@ class TestCreateCuePointAssignsName:
         script._create_cue_point(time=16.0, name="")
 
         assert cue.name == "1.1.1"
+
+
+def _make_cue(time, name):
+    cue = MagicMock()
+    cue.time = time
+    cue.name = name
+    return cue
+
+
+class TestGetCuePoints:
+    def test_returns_all_cues(self):
+        script = _make_script()
+        script._song.cue_points = (
+            _make_cue(0.0, "Intro"),
+            _make_cue(32.0, "Drop"),
+        )
+
+        result = script._get_cue_points()
+
+        assert result == {"cue_points": [
+            {"name": "Intro", "time": 0.0},
+            {"name": "Drop", "time": 32.0},
+        ]}
+
+    def test_empty_when_no_cues(self):
+        script = _make_script()
+        script._song.cue_points = ()
+
+        assert script._get_cue_points() == {"cue_points": []}
+
+
+class TestJumpToCueByName:
+    def test_jumps_to_named_cue(self):
+        script = _make_script()
+        drop = _make_cue(32.0, "Drop")
+        script._song.cue_points = (_make_cue(0.0, "Intro"), drop)
+
+        result = script._jump_to_cue(name="Drop")
+
+        drop.jump.assert_called_once_with()
+        assert result == {"name": "Drop", "time": 32.0}
+
+    def test_raises_when_name_not_found(self):
+        script = _make_script()
+        script._song.cue_points = (_make_cue(0.0, "Intro"),)
+
+        try:
+            script._jump_to_cue(name="Nope")
+        except ValueError as e:
+            assert "Nope" in str(e)
+        else:
+            raise AssertionError("expected ValueError")
+
+
+class TestDeleteCuePoint:
+    def test_deletes_cue_at_time(self):
+        script = _make_script()
+        script._song.cue_points = (
+            _make_cue(0.0, "Intro"),
+            _make_cue(32.0, "Drop"),
+        )
+        script.schedule_message = MagicMock(side_effect=lambda _delay, fn: fn())
+
+        result = script._delete_cue_point(time=32.0)
+
+        assert script._song.current_song_time == 32.0
+        script._song.set_or_delete_cue.assert_called_once_with()
+        assert result == {"deleted": True}
+
+    def test_raises_when_no_cue_at_time(self):
+        script = _make_script()
+        script._song.cue_points = (_make_cue(0.0, "Intro"),)
+
+        try:
+            script._delete_cue_point(time=32.0)
+        except ValueError as e:
+            assert "No cue point" in str(e)
+        else:
+            raise AssertionError("expected ValueError")
+        script._song.set_or_delete_cue.assert_not_called()
+
+
+class _Live12Track(_NormalTrack):
+    """Live 12 exposes create_midi_clip(start_time, length) on Track."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.create_midi_clip = MagicMock()
+
+
+class _Live11Track(_NormalTrack):
+    """Live 11 has no create_midi_clip on Track — must round-trip through a slot."""
+
+    def __init__(self, slots=None, **kw):
+        super().__init__(**kw)
+        self.clip_slots = list(slots or [])
+        self.duplicate_clip_to_arrangement = MagicMock()
+
+
+def _empty_slot():
+    slot = MagicMock()
+    slot.has_clip = False
+    new_clip = MagicMock()
+
+    def _create(length):
+        slot.has_clip = True
+        slot.clip = new_clip
+
+    def _delete():
+        slot.has_clip = False
+        slot.clip = None
+
+    slot.create_clip.side_effect = _create
+    slot.delete_clip.side_effect = _delete
+    return slot, new_clip
+
+
+def _full_slot():
+    slot = MagicMock()
+    slot.has_clip = True
+    return slot
+
+
+def _wire_live12_create(track, new_clip):
+    """Make track.create_midi_clip() append new_clip to arrangement_clips,
+    matching Live 12's actual side effect."""
+    track.create_midi_clip.side_effect = (
+        lambda *_: track.arrangement_clips.append(new_clip))
+
+
+class TestCreateArrangementClipLive12:
+    def test_calls_create_midi_clip_with_start_and_length(self):
+        track = _Live12Track()
+        script = _make_script([track])
+
+        script._create_arrangement_clip(track_index=0, position=8.0, length=16.0)
+
+        track.create_midi_clip.assert_called_once_with(8.0, 16.0)
+
+    def test_assigns_name_to_new_clip(self):
+        track = _Live12Track()
+        new_clip = MagicMock()
+        new_clip.start_time = 8.0
+        new_clip.end_time = 12.0
+        _wire_live12_create(track, new_clip)
+        script = _make_script([track])
+
+        script._create_arrangement_clip(
+            track_index=0, position=8.0, length=4.0, name="Intro")
+
+        assert new_clip.name == "Intro"
+
+    def test_blank_name_does_not_overwrite(self):
+        track = _Live12Track()
+        new_clip = MagicMock()
+        new_clip.start_time = 0.0
+        new_clip.end_time = 4.0
+        new_clip.name = "Original"
+        _wire_live12_create(track, new_clip)
+        script = _make_script([track])
+
+        script._create_arrangement_clip(
+            track_index=0, position=0.0, length=4.0, name="")
+
+        assert new_clip.name == "Original"
+
+    def test_finds_clip_via_scan_when_create_returns_none(self):
+        track = _Live12Track()
+        new_clip = MagicMock()
+        new_clip.start_time = 4.0
+        new_clip.end_time = 8.0
+        # Live 12's create_midi_clip return value is unspecified by the LOM —
+        # explicitly return None and confirm the scan still picks up the clip.
+        def _create(*_):
+            track.arrangement_clips.append(new_clip)
+            return None
+        track.create_midi_clip.side_effect = _create
+        script = _make_script([track])
+
+        script._create_arrangement_clip(
+            track_index=0, position=4.0, length=4.0, name="Verse")
+
+        assert new_clip.name == "Verse"
+
+
+class TestCreateArrangementClipLive11Fallback:
+    def test_round_trips_through_empty_session_slot(self):
+        empty, new_clip = _empty_slot()
+        track = _Live11Track(slots=[_full_slot(), empty])
+        script = _make_script([track])
+
+        script._create_arrangement_clip(track_index=0, position=8.0, length=4.0)
+
+        empty.create_clip.assert_called_once_with(4.0)
+        track.duplicate_clip_to_arrangement.assert_called_once_with(new_clip, 8.0)
+        empty.delete_clip.assert_called_once_with()
+
+    def test_cleans_up_session_clip_when_duplicate_fails(self):
+        empty, _ = _empty_slot()
+        track = _Live11Track(slots=[empty])
+        track.duplicate_clip_to_arrangement.side_effect = RuntimeError("boom")
+        script = _make_script([track])
+
+        try:
+            script._create_arrangement_clip(track_index=0, position=0.0, length=4.0)
+        except RuntimeError:
+            pass
+
+        empty.delete_clip.assert_called_once_with()
+
+    def test_raises_when_no_empty_slot(self):
+        track = _Live11Track(slots=[_full_slot(), _full_slot()])
+        script = _make_script([track])
+
+        try:
+            script._create_arrangement_clip(track_index=0, position=0.0, length=4.0)
+        except Exception as e:
+            assert "empty" in str(e).lower() or "slot" in str(e).lower()
+        else:
+            raise AssertionError("expected an error when no empty slot is available")
+
+        track.duplicate_clip_to_arrangement.assert_not_called()
+
+
+class TestArrangementClipRejectsInvalidTracks:
+    """_validate_not_return_or_master also blocks group tracks; otherwise the
+    Live 11 fallback would iterate clip_slots to no avail and the Live 12
+    create_midi_clip call would fail at the API boundary."""
+
+    def test_rejects_group_track(self):
+        group = _GroupTrack("Mix Bus")
+        script = _make_script([group])
+
+        try:
+            script._create_arrangement_clip(track_index=0, position=0.0, length=4.0)
+        except ValueError as e:
+            assert "group" in str(e).lower()
+        else:
+            raise AssertionError("expected ValueError for group track")
