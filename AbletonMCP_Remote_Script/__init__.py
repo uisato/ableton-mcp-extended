@@ -439,7 +439,9 @@ class AbletonMCP(ControlSurface):
                 response["result"] = self.get_browser_tree(category_type)
             elif command_type == "get_browser_items_at_path":
                 path = params.get("path", "")
-                response["result"] = self.get_browser_items_at_path(path)
+                limit = params.get("limit")  # None = unlimited (backward compat)
+                offset = params.get("offset", 0)
+                response["result"] = self.get_browser_items_at_path(path, limit=limit, offset=offset)
             elif command_type == "get_arrangement_info":
                 track_index = params.get("track_index", -1)
                 response["result"] = self._get_arrangement_info(track_index)
@@ -2043,17 +2045,22 @@ class AbletonMCP(ControlSurface):
             self.log_message(traceback.format_exc())
             raise
     
-    def get_browser_items_at_path(self, path):
+    def get_browser_items_at_path(self, path, limit=None, offset=0):
         """
         Get browser items at a specific path.
-        
+
         Args:
             path: Path in the format "category/folder/subfolder"
                  where category is one of: instruments, sounds, drums, audio_effects, midi_effects
                  or any other available browser category
-                 
+            limit: Maximum number of items to return (None = all). Prevents
+                   large folders (e.g. sample packs with 500+ items) from
+                   flooding the response.
+            offset: Number of items to skip from the start (for pagination).
+
         Returns:
-            Dictionary with items at the specified path
+            Dictionary with items at the specified path. Includes
+            `total_count` (items before slicing) and `returned` (after).
         """
         try:
             # Access the application's browser instance instead of creating a new one
@@ -2132,7 +2139,25 @@ class AbletonMCP(ControlSurface):
                         "uri": child.uri if hasattr(child, 'uri') else None
                     }
                     items.append(item_info)
-            
+
+            # Apply pagination (offset + limit). Negative/invalid values are
+            # clamped silently so the Remote Script never crashes on a bad
+            # caller; the MCP-server wrapper is where validation errors
+            # should surface.
+            total_count = len(items)
+            try:
+                off = max(0, int(offset or 0))
+            except (TypeError, ValueError):
+                off = 0
+            if limit is None:
+                sliced = items[off:]
+            else:
+                try:
+                    lim = max(0, int(limit))
+                except (TypeError, ValueError):
+                    lim = 0
+                sliced = items[off:off + lim]
+
             result = {
                 "path": path,
                 "name": current_item.name if hasattr(current_item, 'name') else "Unknown",
@@ -2140,10 +2165,15 @@ class AbletonMCP(ControlSurface):
                 "is_folder": hasattr(current_item, 'children') and bool(current_item.children),
                 "is_device": hasattr(current_item, 'is_device') and current_item.is_device,
                 "is_loadable": hasattr(current_item, 'is_loadable') and current_item.is_loadable,
-                "items": items
+                "items": sliced,
+                "total_count": total_count,
+                "returned": len(sliced),
+                "offset": off,
+                "limit": limit
             }
-            
-            self.log_message("Retrieved {0} items at path: {1}".format(len(items), path))
+
+            self.log_message("Retrieved {0}/{1} items at path: {2} (offset={3}, limit={4})".format(
+                len(sliced), total_count, path, off, limit))
             return result
             
         except Exception as e:

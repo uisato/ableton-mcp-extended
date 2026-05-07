@@ -797,27 +797,40 @@ def get_browser_tree(ctx: Context, category_type: str = "all") -> str:
             return f"Error getting browser tree: {error_msg}"
 
 @mcp.tool()
-def get_browser_items_at_path(ctx: Context, path: str) -> str:
+def get_browser_items_at_path(ctx: Context, path: str, limit: int = 50, offset: int = 0) -> str:
     """
     Get browser items at a specific path in Ableton's browser.
-    
+
     Parameters:
     - path: Path in the format "category/folder/subfolder"
             where category is one of the available browser categories in Ableton
+    - limit: Max items to return (default 50). Large sample folders can hold
+             500+ items — the default caps the response to keep tool-call
+             output tight. Set to 0 for all items.
+    - offset: Number of items to skip (for pagination). Default 0.
+
+    Response is JSON including 'items', 'total_count', 'returned', 'offset',
+    and 'limit'. If total_count > offset + returned, call again with
+    offset = offset + returned to get the next page.
     """
     try:
         ableton = get_ableton_connection()
-        result = ableton.send_command("get_browser_items_at_path", {
-            "path": path
-        })
-        
+        # Coerce defensively — MCP callers sometimes send numeric args as strings
+        lim = int(limit) if limit is not None else 0
+        off = int(offset) if offset is not None else 0
+        # limit=0 → unlimited (omit from payload, Remote Script treats None as unlimited)
+        payload = {"path": path, "offset": off}
+        if lim > 0:
+            payload["limit"] = lim
+        result = ableton.send_command("get_browser_items_at_path", payload)
+
         # Check if there was an error with available categories
         if "error" in result and "available_categories" in result:
             error = result.get("error", "")
             available_cats = result.get("available_categories", [])
             return (f"Error: {error}\n"
                    f"Available browser categories: {', '.join(available_cats)}")
-        
+
         return json.dumps(result, indent=2)
     except Exception as e:
         error_msg = str(e)
