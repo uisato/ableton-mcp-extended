@@ -1335,7 +1335,7 @@ class AbletonMCP(ControlSurface):
             raise
 
     def _validate_not_return_or_master(self, track_index):
-        """Raise if track is a return or master track."""
+        """Raise if track is a return, master, or group (foldable) track."""
         track = self._song.tracks[track_index]
         # Return tracks and master track are separate in the Live API,
         # but if accessed via tracks list they are regular tracks.
@@ -1345,6 +1345,10 @@ class AbletonMCP(ControlSurface):
                 raise ValueError("Cannot create arrangement clips on return track '{0}'".format(track.name))
         if track == self._song.master_track:
             raise ValueError("Cannot create arrangement clips on master track")
+        # Group tracks are foldable. They have no usable clip_slots/arrangement_clips
+        # for our purposes — the Live 11 fallback would iterate to no avail.
+        if getattr(track, "is_foldable", False):
+            raise ValueError("Cannot create arrangement clips on group track '{0}'".format(track.name))
 
     def _create_arrangement_clip(self, track_index, position, length, name=""):
         """Create MIDI clip in arrangement.

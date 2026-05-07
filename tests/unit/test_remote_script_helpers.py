@@ -381,3 +381,20 @@ class TestCreateArrangementClipLive11Fallback:
             raise AssertionError("expected an error when no empty slot is available")
 
         track.duplicate_clip_to_arrangement.assert_not_called()
+
+
+class TestArrangementClipRejectsInvalidTracks:
+    """_validate_not_return_or_master also blocks group tracks; otherwise the
+    Live 11 fallback would iterate clip_slots to no avail and the Live 12
+    create_midi_clip call would fail at the API boundary."""
+
+    def test_rejects_group_track(self):
+        group = _GroupTrack("Mix Bus")
+        script = _make_script([group])
+
+        try:
+            script._create_arrangement_clip(track_index=0, position=0.0, length=4.0)
+        except ValueError as e:
+            assert "group" in str(e).lower()
+        else:
+            raise AssertionError("expected ValueError for group track")
