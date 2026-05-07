@@ -613,14 +613,17 @@ class AbletonMCP(ControlSurface):
                     "type": self._get_device_type(device)
                 })
             
+            is_group = bool(getattr(track, "is_foldable", False))
+
             result = {
                 "index": track_index,
                 "name": track.name,
                 "is_audio_track": track.has_audio_input,
                 "is_midi_track": track.has_midi_input,
+                "is_group_track": is_group,
                 "mute": track.mute,
                 "solo": track.solo,
-                "arm": track.arm,
+                "arm": None if is_group else track.arm,
                 "volume": track.mixer_device.volume.value,
                 "panning": track.mixer_device.panning.value,
                 "clip_slots": clip_slots,
@@ -1174,17 +1177,23 @@ class AbletonMCP(ControlSurface):
                 tracks = [(track_index, self._song.tracks[track_index])]
 
             for idx, track in tracks:
+                is_group = bool(getattr(track, "is_foldable", False))
+                if is_group and track_index == -1:
+                    continue
+
                 clips = []
-                for ci, clip in enumerate(track.arrangement_clips):
-                    clip_info = self._get_arrangement_clip_info(clip)
-                    clip_info["index"] = ci
-                    clips.append(clip_info)
+                if not is_group:
+                    for ci, clip in enumerate(track.arrangement_clips):
+                        clip_info = self._get_arrangement_clip_info(clip)
+                        clip_info["index"] = ci
+                        clips.append(clip_info)
 
                 tracks_data.append({
                     "index": idx,
                     "name": track.name,
                     "is_midi": track.has_midi_input,
                     "is_audio": track.has_audio_input,
+                    "is_group_track": is_group,
                     "arrangement_clips": clips,
                     "clip_count": len(clips),
                 })
@@ -1255,12 +1264,16 @@ class AbletonMCP(ControlSurface):
     def _create_cue_point(self, time, name=""):
         """Create a cue point at the given time."""
         try:
-            # Check if cue already exists at this position
-            for cp in self._song.cue_points:
+            for cp in tuple(self._song.cue_points):
                 if abs(cp.time - time) < 0.01:
                     raise ValueError("Cue point already exists at this position: " + cp.name)
             self._song.current_song_time = time
             self._song.set_or_delete_cue()
+            if name:
+                for cp in tuple(self._song.cue_points):
+                    if abs(cp.time - time) < 0.01:
+                        cp.name = name
+                        break
             return {"time": time, "name": name}
         except Exception as e:
             self.log_message("Error creating cue point: " + str(e))
