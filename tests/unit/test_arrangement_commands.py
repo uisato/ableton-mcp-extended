@@ -255,15 +255,30 @@ class TestCreateCuePointCommand:
     @patch('MCP_Server.server.get_ableton_connection')
     def test_delete_at_bar(self, mock_conn, mock_ts):
         # Deleting a cue point at bar 5 should convert to beat 16.0
-        mock_ableton = MagicMock()
-        mock_ableton.send_command.return_value = {}
-        mock_conn.return_value = mock_ableton
+        mock_ableton = self._wire(mock_conn, [])  # readback sees no cue → success
 
         from MCP_Server.server import delete_cue_point
-        delete_cue_point(MagicMock(), bar=5)
+        result = delete_cue_point(MagicMock(), bar=5)
 
-        mock_ableton.send_command.assert_called_with(
+        mock_ableton.send_command.assert_any_call(
             "delete_cue_point", {"time": 16.0})
+        assert "Deleted" in result
+        assert "bar 5" in result
+
+    @patch('MCP_Server.server._get_time_signature', return_value=(4, 4))
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_delete_warns_when_readback_still_finds_cue(self, mock_conn, mock_ts):
+        # If the deferred set_or_delete_cue hasn't resolved (or it failed),
+        # the cue is still present after the retry budget. Surface that
+        # honestly rather than claiming success.
+        self._wire(mock_conn, [{"time": 16.0, "name": "1"}])
+
+        from MCP_Server.server import delete_cue_point
+        with patch('time.sleep'):  # skip retry sleeps
+            result = delete_cue_point(MagicMock(), bar=5)
+
+        assert "still" in result.lower()
+        assert "bar 5" in result
 
 
 class TestCreateArrangementMidiClipCommand:

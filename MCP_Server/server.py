@@ -1389,6 +1389,26 @@ def _readback_cue_name(ableton, time_val: float, attempts: int = 4, delay: float
     return None
 
 
+def _readback_cue_absent(ableton, time_val: float, attempts: int = 4, delay: float = 0.05):
+    """Return True once the cue at ``time_val`` is gone after a delete.
+
+    Symmetric to ``_readback_cue_name`` — the Remote Script defers
+    ``set_or_delete_cue`` via ``schedule_message`` so the playhead set lands
+    first, and the readback covers the tick race.
+    """
+    import time as _time
+    for i in range(attempts):
+        result = ableton.send_command("get_cue_points", {})
+        present = any(
+            abs(cp.get("time", -1) - time_val) < 0.01
+            for cp in result.get("cue_points", []))
+        if not present:
+            return True
+        if i < attempts - 1:
+            _time.sleep(delay)
+    return False
+
+
 @mcp.tool()
 def create_cue_point(ctx: Context, bar: int = 0, beat: float = 0.0, name: str = "") -> str:
     """Create a cue point at a position.
@@ -1429,7 +1449,11 @@ def delete_cue_point(ctx: Context, bar: int = 0, beat: float = 0.0) -> str:
         ableton = get_ableton_connection()
         time_val = _convert_bar_to_beat(bar, beat)
         ableton.send_command("delete_cue_point", {"time": time_val})
-        return f"Deleted cue point at bar {bar if bar > 0 else '?'}"
+        bar_str = str(bar) if bar > 0 else "?"
+        if _readback_cue_absent(ableton, time_val):
+            return f"Deleted cue point at bar {bar_str}"
+        return (f"Delete request sent for bar {bar_str}, but cue still "
+                f"present after readback (Live tick race)")
     except Exception as e:
         logger.error(f"Error deleting cue point: {str(e)}")
         return f"Error deleting cue point: {str(e)}"
