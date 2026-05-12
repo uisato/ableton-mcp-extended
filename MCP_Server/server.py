@@ -3,6 +3,7 @@ from mcp.server.fastmcp import FastMCP, Context
 import socket
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -341,7 +342,10 @@ def get_ableton_connection():
         for attempt in range(1, max_attempts + 1):
             try:
                 logger.info(f"Connecting to Ableton (attempt {attempt}/{max_attempts})...")
-                _ableton_connection = AbletonConnection(host="localhost", port=9877)
+                _ableton_connection = AbletonConnection(
+                    host=os.getenv("ABLETON_HOST", "localhost"),
+                    port=int(os.getenv("ABLETON_PORT", "9877")),
+                )
                 if _ableton_connection.connect():
                     logger.info("Created new persistent connection to Ableton")
                     
