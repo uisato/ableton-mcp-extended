@@ -42,3 +42,7 @@ Thumbs.db
 *.adv
 *.asd
 !AbletonMCP_Remote_Script/*
+
+
+#Ignore vscode AI rules
+.github/instructions/codacy.instructions.md
