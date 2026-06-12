@@ -28,6 +28,9 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 packages = ["MCP_Server", "elevenlabs_mcp", "AbletonMCP_UDP"]
 
+[tool.setuptools.package-dir]
+AbletonMCP_UDP = "Ableton-MCP_hybrid-server/AbletonMCP_UDP"
+
 [project.urls]
 "Homepage" = "https://github.com/uisato/ableton-mcp-extended"
 "Bug Tracker" = "https://github.com/uisato/ableton-mcp-extended/issues"
