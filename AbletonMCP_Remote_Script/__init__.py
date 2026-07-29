@@ -241,7 +241,9 @@ class AbletonMCP(ControlSurface):
                                  "set_device_parameter", "set_device_enabled",
                                  "delete_device", "navigate_preset",
                                  "delete_track",
-                                 "set_track_volume", "set_track_panning"]:
+                                 "set_track_volume", "set_track_panning",
+                                 "set_track_mute", "set_track_solo",
+                                 "set_track_arm"]:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
@@ -387,6 +389,18 @@ class AbletonMCP(ControlSurface):
                             ti = params.get("track_index", 0)
                             panning = params.get("panning", 0.0)
                             result = self._set_track_panning(ti, panning)
+                        elif command_type == "set_track_mute":
+                            ti = params.get("track_index", 0)
+                            mute = params.get("mute", True)
+                            result = self._set_track_mute(ti, mute)
+                        elif command_type == "set_track_solo":
+                            ti = params.get("track_index", 0)
+                            solo = params.get("solo", True)
+                            result = self._set_track_solo(ti, solo)
+                        elif command_type == "set_track_arm":
+                            ti = params.get("track_index", 0)
+                            arm = params.get("arm", True)
+                            result = self._set_track_arm(ti, arm)
                         elif command_type == "navigate_preset":
                             ti = params.get("track_index", 0)
                             di = params.get("device_index", 0)
@@ -742,6 +756,90 @@ class AbletonMCP(ControlSurface):
             }
         except Exception as e:
             self.log_message("Error setting track panning: " + str(e))
+            raise
+
+    def _set_track_mute(self, track_index, mute):
+        """Mute or unmute a track.
+
+        Args:
+            track_index: 0-based track index (includes return tracks after
+                session tracks)
+            mute: True to mute, False to unmute
+        """
+        try:
+            all_tracks = list(self._song.tracks) + list(self._song.return_tracks)
+            if track_index < 0 or track_index >= len(all_tracks):
+                raise IndexError("Track index {0} out of range (0-{1})".format(
+                    track_index, len(all_tracks) - 1))
+            track = all_tracks[track_index]
+            track.mute = bool(mute)
+            return {
+                "track_name": track.name,
+                "mute": track.mute,
+            }
+        except Exception as e:
+            self.log_message("Error setting track mute: " + str(e))
+            raise
+
+    def _set_track_solo(self, track_index, solo):
+        """Solo or unsolo a track.
+
+        Args:
+            track_index: 0-based track index (includes return tracks after
+                session tracks)
+            solo: True to solo, False to unsolo
+        """
+        try:
+            all_tracks = list(self._song.tracks) + list(self._song.return_tracks)
+            if track_index < 0 or track_index >= len(all_tracks):
+                raise IndexError("Track index {0} out of range (0-{1})".format(
+                    track_index, len(all_tracks) - 1))
+            track = all_tracks[track_index]
+            track.solo = bool(solo)
+            return {
+                "track_name": track.name,
+                "solo": track.solo,
+            }
+        except Exception as e:
+            self.log_message("Error setting track solo: " + str(e))
+            raise
+
+    def _set_track_arm(self, track_index, arm):
+        """Arm or unarm a track for recording.
+
+        Args:
+            track_index: 0-based index into the SESSION tracks only
+            arm: True to arm, False to unarm
+
+        Unlike mute and solo, Arm does not exist on every track: group, master
+        and return tracks have no Arm state, and touching track.arm on one
+        raises inside Live ("Master and Return Tracks have no 'Arm' state!").
+        So this refuses them with a clear message rather than letting that
+        surface as an opaque error. _get_track_info already takes the same
+        position, reporting "arm": None for a group track.
+        """
+        try:
+            session_tracks = list(self._song.tracks)
+            if track_index < 0 or track_index >= len(session_tracks):
+                raise IndexError(
+                    "Track index {0} out of range (0-{1}). Return and master "
+                    "tracks have no Arm state.".format(
+                        track_index, len(session_tracks) - 1))
+            track = session_tracks[track_index]
+            if bool(getattr(track, "is_foldable", False)):
+                raise ValueError(
+                    "Track '{0}' is a group track and has no Arm state".format(
+                        track.name))
+            if not getattr(track, "can_be_armed", True):
+                raise ValueError(
+                    "Track '{0}' cannot be armed".format(track.name))
+            track.arm = bool(arm)
+            return {
+                "track_name": track.name,
+                "arm": track.arm,
+            }
+        except Exception as e:
+            self.log_message("Error setting track arm: " + str(e))
             raise
 
     def _create_clip(self, track_index, clip_index, length):

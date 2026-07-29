@@ -120,6 +120,7 @@ class AbletonConnection:
             "set_device_parameter", "set_device_enabled",
             "delete_device", "navigate_preset",
             "set_track_volume", "set_track_panning",
+            "set_track_mute", "set_track_solo", "set_track_arm",
         ]
         
         try:
@@ -540,6 +541,81 @@ def set_track_panning(ctx: Context, track_index: int, panning: float) -> str:
     except Exception as e:
         logger.error(f"Error setting track panning: {str(e)}")
         return f"Error setting track panning: {str(e)}"
+
+
+@mcp.tool()
+def set_track_mute(ctx: Context, track_index: int, mute: bool = True) -> str:
+    """Mute or unmute a track.
+
+    Parameters:
+    - track_index: Track number (1-based). Return tracks come after session tracks.
+    - mute: True to mute, False to unmute.
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        result = ableton.send_command("set_track_mute", {
+            "track_index": ti,
+            "mute": bool(mute),
+        })
+        name = result.get("track_name", "?")
+        state = "muted" if result.get("mute", mute) else "unmuted"
+        return f"Track '{name}' is now {state}"
+    except Exception as e:
+        logger.error(f"Error setting track mute: {str(e)}")
+        return f"Error setting track mute: {str(e)}"
+
+
+@mcp.tool()
+def set_track_solo(ctx: Context, track_index: int, solo: bool = True) -> str:
+    """Solo or unsolo a track.
+
+    Soloing is exclusive in Ableton by default: soloing one track implicitly
+    silences the others without changing their mute state.
+
+    Parameters:
+    - track_index: Track number (1-based). Return tracks come after session tracks.
+    - solo: True to solo, False to unsolo.
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        result = ableton.send_command("set_track_solo", {
+            "track_index": ti,
+            "solo": bool(solo),
+        })
+        name = result.get("track_name", "?")
+        state = "soloed" if result.get("solo", solo) else "unsoloed"
+        return f"Track '{name}' is now {state}"
+    except Exception as e:
+        logger.error(f"Error setting track solo: {str(e)}")
+        return f"Error setting track solo: {str(e)}"
+
+
+@mcp.tool()
+def set_track_arm(ctx: Context, track_index: int, arm: bool = True) -> str:
+    """Arm or unarm a track for recording.
+
+    Only session tracks have an Arm state. Group, master and return tracks do
+    not, and asking for one returns a clear error rather than a Live exception.
+
+    Parameters:
+    - track_index: Session track number (1-based).
+    - arm: True to arm, False to unarm.
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        result = ableton.send_command("set_track_arm", {
+            "track_index": ti,
+            "arm": bool(arm),
+        })
+        name = result.get("track_name", "?")
+        state = "armed" if result.get("arm", arm) else "unarmed"
+        return f"Track '{name}' is now {state}"
+    except Exception as e:
+        logger.error(f"Error setting track arm: {str(e)}")
+        return f"Error setting track arm: {str(e)}"
 
 
 @mcp.tool()
