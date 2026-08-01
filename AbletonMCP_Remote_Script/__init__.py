@@ -226,7 +226,7 @@ class AbletonMCP(ControlSurface):
                 track_index = params.get("track_index", 0)
                 response["result"] = self._get_track_info(track_index)
             # Commands that modify Live's state should be scheduled on the main thread
-            elif command_type in ["create_midi_track", "set_track_name",
+            elif command_type in ["create_midi_track", "create_audio_track", "set_track_name",
                                  "create_clip", "add_notes_to_clip", "set_clip_name",
                                  "set_tempo", "fire_clip", "stop_clip",
                                  "start_playback", "stop_playback", "load_browser_item",
@@ -252,6 +252,9 @@ class AbletonMCP(ControlSurface):
                         if command_type == "create_midi_track":
                             index = params.get("index", -1)
                             result = self._create_midi_track(index)
+                        elif command_type == "create_audio_track":
+                            index = params.get("index", -1)
+                            result = self._create_audio_track(index)
                         elif command_type == "set_track_name":
                             track_index = params.get("track_index", 0)
                             name = params.get("name", "")
@@ -652,8 +655,28 @@ class AbletonMCP(ControlSurface):
         except Exception as e:
             self.log_message("Error creating MIDI track: " + str(e))
             raise
-    
-    
+
+
+    def _create_audio_track(self, index):
+        """Create a new audio track at the specified index"""
+        try:
+            # Create the track
+            self._song.create_audio_track(index)
+
+            # Get the new track
+            new_track_index = len(self._song.tracks) - 1 if index == -1 else index
+            new_track = self._song.tracks[new_track_index]
+
+            result = {
+                "index": new_track_index,
+                "name": new_track.name
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error creating audio track: " + str(e))
+            raise
+
+
     def _set_track_name(self, track_index, name):
         """Set the name of a track"""
         try:
