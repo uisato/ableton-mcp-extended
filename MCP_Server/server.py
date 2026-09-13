@@ -1,9 +1,11 @@
 # ableton_mcp_server.py
 from mcp.server.fastmcp import FastMCP, Context
+import os
 import socket
 import json
 import logging
 import re
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -14,6 +16,12 @@ from typing import AsyncIterator, Dict, Any, List, Union
 logging.basicConfig(level=logging.INFO, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("AbletonMCPServer")
+
+ABLETON_HOST = "localhost"
+ABLETON_PORT = 9877
+CONNECT_TIMEOUT_SECONDS = 3.0
+CONNECT_ATTEMPTS = 3
+CONNECT_RETRY_DELAY_SECONDS = 0.5
 
 @dataclass
 class AbletonConnection:
@@ -27,8 +35,9 @@ class AbletonConnection:
             return True
             
         try:
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.connect((self.host, self.port))
+            # Bounded connect so a half-open listener can never hang the server.
+            self.sock = socket.create_connection((self.host, self.port), timeout=CONNECT_TIMEOUT_SECONDS)
+            self.sock.settimeout(None)
             logger.info(f"Connected to Ableton at {self.host}:{self.port}")
             return True
         except Exception as e:
@@ -179,15 +188,11 @@ class AbletonConnection:
 async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
     """Manage server startup and shutdown lifecycle"""
     try:
-        logger.info("AbletonMCP server starting up")
-        
-        try:
-            ableton = get_ableton_connection()
-            logger.info("Successfully connected to Ableton on startup")
-        except Exception as e:
-            logger.warning(f"Could not connect to Ableton on startup: {str(e)}")
-            logger.warning("Make sure the Ableton Remote Script is running")
-        
+        # Do NOT touch Ableton here. This hook runs before the MCP initialize
+        # handshake is answered; any blocking socket I/O (or Live not running)
+        # delays/kills the handshake and the client reports "Server disconnected".
+        # The connection is established lazily by the first tool call instead.
+        logger.info("AbletonMCP server starting up (Ableton connection is lazy)")
         yield {}
     finally:
         global _ableton_connection
@@ -337,11 +342,11 @@ def get_ableton_connection():
     # Connection doesn't exist or is invalid, create a new one
     if _ableton_connection is None:
         # Try to connect up to 3 times with a short delay between attempts
-        max_attempts = 3
+        max_attempts = CONNECT_ATTEMPTS
         for attempt in range(1, max_attempts + 1):
             try:
                 logger.info(f"Connecting to Ableton (attempt {attempt}/{max_attempts})...")
-                _ableton_connection = AbletonConnection(host="localhost", port=9877)
+                _ableton_connection = AbletonConnection(host=ABLETON_HOST, port=ABLETON_PORT)
                 if _ableton_connection.connect():
                     logger.info("Created new persistent connection to Ableton")
                     
@@ -368,13 +373,16 @@ def get_ableton_connection():
             
             # Wait before trying again, but only if we have more attempts left
             if attempt < max_attempts:
-                import time
-                time.sleep(1.0)
+                time.sleep(CONNECT_RETRY_DELAY_SECONDS)
         
         # If we get here, all connection attempts failed
         if _ableton_connection is None:
             logger.error("Failed to connect to Ableton after multiple attempts")
-            raise Exception("Could not connect to Ableton. Make sure the Remote Script is running.")
+            raise Exception(
+                f"Could not connect to Ableton at {ABLETON_HOST}:{ABLETON_PORT}. "
+                "Make sure Ableton Live is running and the AbletonMCP Remote Script is "
+                "selected under Preferences > Link, Tempo & MIDI > Control Surface."
+            )
     
     return _ableton_connection
 
@@ -2171,9 +2179,40 @@ def navigate_device_preset(
 
 
 # Main execution
-def main():
-    """Run the MCP server"""
+def _load_supervisor_module():
+    try:
+        from . import supervisor  # imported as MCP_Server.server
+    except ImportError:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import supervisor  # run as a script: python MCP_Server/server.py
+    return supervisor
+
+
+def _run_worker():
+    """Run the actual MCP server in this process."""
+    sup = _load_supervisor_module()
+    worker_log = sup.setup_file_logging("AbletonMCPWorker")
+    sup.install_signal_logging(worker_log)
+    worker_log.info("worker started (ppid=%s)", os.getppid())
     mcp.run()
+
+
+def main():
+    """Entry point.
+
+    By default this process is only a thin crash-resilient supervisor (see
+    supervisor.py) that runs ``server.py --worker`` as a child and restarts it
+    -- replaying the MCP handshake -- if it dies.  Claude Desktop never
+    restarts a dead MCP server on its own, so without this a single stray kill
+    leaves the Ableton tools gone until the app is relaunched.
+    """
+    if "--worker" in sys.argv[1:] or os.environ.get("ABLETON_MCP_NO_SUPERVISOR"):
+        _run_worker()
+        return
+    sup = _load_supervisor_module()
+    worker_cmd = [sys.executable, os.path.abspath(__file__), "--worker"]
+    raise SystemExit(sup.run_supervisor(worker_cmd, cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 
 if __name__ == "__main__":
     main()
