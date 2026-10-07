@@ -86,12 +86,22 @@ cd ableton-mcp-extended
 pip install -e .
 ```
 
+Verify the install (should print `OK`):
+```bash
+python -c "from mcp.server.fastmcp import FastMCP; print('OK')"
+```
+
+> **Note:** This project targets the `mcp` 1.x SDK. `pip install -e .` pins `mcp<2` for you. If you see `No module named 'mcp.server.fastmcp'`, an `mcp` 2.x package is installed in that environment, so re-run `pip install -e .` to downgrade it.
+
 ### 2. **Install Ableton Script**
 1. Find your Ableton User Library Remote Scripts folder:
    - **Windows**: `C:\Users\[You]\Documents\Ableton\User Library\Remote Scripts\`
    - **Mac**: `~/Music/Ableton/User Library/Remote Scripts/`
+   - Not there? Your User Library may have been moved (e.g. into OneDrive on Windows). Check **Preferences → Library → Location of User Library** in Live, and create the `Remote Scripts` folder inside it if it doesn't exist.
 2. Create folder: `AbletonMCP`
 3. Copy `AbletonMCP_Remote_Script/__init__.py` into this folder
+
+> The Remote Scripts are copied into Live by hand; they are not installed by `pip`.
 
 ### 3. **Configure Ableton**
 1. Open Ableton Live
@@ -112,6 +122,8 @@ pip install -e .
   }
 }
 ```
+
+If your config file already has content, add the `AbletonMCP` entry under `mcpServers` rather than replacing the file. If `python` isn't the interpreter you ran `pip install -e .` with, use its full path as `command` (run `python -c "import sys; print(sys.executable)"` to find it).
 
 **For Cursor:**
 Add MCP server in Settings → MCP with the same path.
@@ -154,9 +166,11 @@ graph TB
 
 For real-time parameter control with ultra-low latency:
 
+The UDP server is a second Remote Script, installed the same way as the main one (it is not part of the `pip` package). Copy it into the same `Remote Scripts` folder from step 2, then add **AbletonMCP_UDP** as another Control Surface in Live. Both scripts can run at the same time.
+
 ```bash
-# Install the hybrid server
-cp -r Ableton-MCP_hybrid-server/AbletonMCP_UDP/ ~/Remote\ Scripts/AbletonMCP_UDP/
+# Install the hybrid server (Mac path shown; use your Remote Scripts folder)
+cp -r Ableton-MCP_hybrid-server/AbletonMCP_UDP/ ~/Music/Ableton/User\ Library/Remote\ Scripts/AbletonMCP_UDP/
 
 # Try the XY Mouse Controller example
 cd experimental_tools/xy_mouse_controller
@@ -186,7 +200,7 @@ Example mcp-config.json:
   "mcpServers": {
     "AbletonMCP": {
       "command": "python",
-      "args": ["/path/to/ableton-mcp-extended/server.py"]
+      "args": ["/path/to/ableton-mcp-extended/MCP_Server/server.py"]
     },
     "ElevenLabs": {
       "command": "python",
