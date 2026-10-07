@@ -43,6 +43,7 @@ First, clone the repository and install the required Python package.
     ```bash
     python -c "from mcp.server.fastmcp import FastMCP; print('✅ Python package installed successfully!')"
     ```
+    > **Note:** This project targets the `mcp` 1.x SDK, and `pip install -e .` pins `mcp<2` for you. If this check fails with `No module named 'mcp.server.fastmcp'`, an `mcp` 2.x package is installed in that environment, so re-run `pip install -e .` to downgrade it.
 
 ---
 
@@ -73,7 +74,11 @@ C:\Users\[YourUsername]\Documents\Ableton\User Library\Remote Scripts\
 3. Paste: `~/Library/Preferences/Ableton/`
 4. Navigate to your Live version folder, then `User Remote Scripts`
 
+> **Folder not there?** Your User Library may have been moved (for example into OneDrive on Windows: `%USERPROFILE%\OneDrive\Documents\Ableton\User Library`). Check **Preferences → Library → Location of User Library** in Live. If there is no `Remote Scripts` folder inside it yet, create one.
+
 ### Install the Main Remote Script
+
+The Remote Scripts are copied into Live by hand. They are not installed by `pip`.
 
 1. **Create folder:** In your Remote Scripts directory, create a new folder called `AbletonMCP`
 2. **Copy file:** Copy `AbletonMCP_Remote_Script/__init__.py` into the `AbletonMCP` folder
@@ -116,7 +121,7 @@ Choose your preferred AI assistant:
 1. **Open Claude Desktop**
 2. Go to **Claude** → **Settings** → **Developer**
 3. Click **"Edit Config"**
-4. **Replace the entire content** with:
+4. **Add the `AbletonMCP` server** to the config. If the file is empty, paste the example below. If it already has content (Claude Desktop stores other settings here), add only the `"AbletonMCP": { ... }` entry inside `"mcpServers"`, creating that key if it's missing, and keep everything else. Replacing the whole file would erase your other settings.
 
 ```json
 {
@@ -131,7 +136,7 @@ Choose your preferred AI assistant:
 }
 ```
 
-5. **Update the path:** Replace `C:\\path\\to\\ableton-mcp-extended` with your actual installation path
+5. **Update the path:** Replace `C:\\path\\to\\ableton-mcp-extended` with your actual installation path. If `python` isn't the interpreter you ran `pip install -e .` with, set `"command"` to its full path (run `python -c "import sys; print(sys.executable)"` to find it).
 6. **Save** and **restart Claude Desktop**
 
 #### 🔍 Finding Your Installation Path
@@ -206,7 +211,7 @@ If all three commands work correctly, congratulations! 🎉 Your installation is
 
 For ultra-low latency parameter control (like the XY Mouse Controller example):
 
-1. **Install UDP Remote Script:**
+1. **Install UDP Remote Script** (copied by hand like the main script, not installed by `pip`):
    - Create folder: `Remote Scripts/AbletonMCP_UDP/`
    - Copy: `Ableton-MCP_hybrid-server/AbletonMCP_UDP/__init__.py`
 
@@ -241,7 +246,7 @@ Add AI voice generation to your workflow:
      "mcpServers": {
        "AbletonMCP": {
          "command": "python",
-         "args": ["C:/path/to/MCP_Server/server.py"]
+         "args": ["C:/path/to/ableton-mcp-extended/MCP_Server/server.py"]
        },
        "ElevenLabs": {
          "command": "python",
@@ -293,7 +298,8 @@ Add AI voice generation to your workflow:
 1. Verify Python installation: `python --version`
 2. Check absolute path to server.py file
 3. Use double backslashes on Windows: `C:\\path\\to\\file`
-4. Restart Claude Desktop after config changes
+4. Set `"command"` to the full path of the Python you installed the package with
+5. Restart Claude Desktop after config changes
 </details>
 
 <details>
