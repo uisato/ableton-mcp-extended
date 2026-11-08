@@ -23,6 +23,27 @@ CONNECT_TIMEOUT_SECONDS = 3.0
 CONNECT_ATTEMPTS = 3
 CONNECT_RETRY_DELAY_SECONDS = 0.5
 
+# Commands that change Live's state. Must match the Remote Script's
+# MAIN_THREAD_COMMANDS; tests/unit/test_command_consistency.py enforces this.
+MODIFYING_COMMANDS = (
+    "create_midi_track", "set_track_name",
+    "create_clip", "add_notes_to_clip", "set_clip_name",
+    "set_tempo", "fire_clip", "stop_clip",
+    "start_playback", "stop_playback", "load_browser_item",
+    "set_song_time", "set_arrangement_loop", "jump_to_cue",
+    "create_cue_point", "delete_cue_point",
+    "create_arrangement_clip", "create_arrangement_audio_clip",
+    "duplicate_to_arrangement", "delete_arrangement_clip",
+    "set_arrangement_clip_property",
+    "set_view", "control_arrangement_view",
+    "manage_clip_automation",
+    "add_notes_to_arrangement_clip",
+    "set_device_parameter", "set_device_enabled",
+    "delete_device", "navigate_preset",
+    "delete_track",
+    "set_track_volume", "set_track_panning",
+)
+
 @dataclass
 class AbletonConnection:
     host: str
@@ -113,27 +134,8 @@ class AbletonConnection:
         }
         
         # Check if this is a state-modifying command
-        # Must match the Remote Script's main-thread command list;
-        # tests/unit/test_command_consistency.py enforces this.
-        is_modifying_command = command_type in [
-            "create_midi_track", "set_track_name",
-            "create_clip", "add_notes_to_clip", "set_clip_name",
-            "set_tempo", "fire_clip", "stop_clip",
-            "start_playback", "stop_playback", "load_browser_item",
-            "set_song_time", "set_arrangement_loop", "jump_to_cue",
-            "create_cue_point", "delete_cue_point",
-            "create_arrangement_clip", "create_arrangement_audio_clip",
-            "duplicate_to_arrangement", "delete_arrangement_clip",
-            "set_arrangement_clip_property",
-            "set_view", "control_arrangement_view",
-            "manage_clip_automation",
-            "add_notes_to_arrangement_clip",
-            "set_device_parameter", "set_device_enabled",
-            "delete_device", "navigate_preset",
-            "delete_track",
-            "set_track_volume", "set_track_panning",
-        ]
-        
+        is_modifying_command = command_type in MODIFYING_COMMANDS
+
         try:
             logger.info(f"Sending command: {command_type} with params: {params}")
             
@@ -1606,17 +1608,15 @@ def set_arrangement_clip_property(
                 params = {"track_index": ti, **target,
                           "property": prop_name, "value": value}
                 result = ableton.send_command("set_arrangement_clip_property", params)
-                if changed_clip is None and isinstance(result, dict):
+                if not changed_clip and isinstance(result, dict):
                     changed_clip = result.get("clip_name")
                 changes.append(f"{prop_name}={value}")
 
         if not changes:
             return "No properties specified to change."
 
-        if changed_clip is not None:
-            ref = f"'{changed_clip}'"
-        else:
-            ref = f"'{clip_name}'" if clip_name else f"clip {clip_index}"
+        label = changed_clip or clip_name
+        ref = f"'{label}'" if label else f"clip {clip_index}"
         return f"Updated {ref} on track {track_index}: {', '.join(changes)}"
     except Exception as e:
         logger.error(f"Error setting arrangement clip property: {str(e)}")
@@ -1688,10 +1688,8 @@ def manage_clip_automation(
         result = ableton.send_command("manage_clip_automation", params)
 
         changed_clip = result.get("clip_name") if isinstance(result, dict) else None
-        if changed_clip is not None:
-            ref = f"clip '{changed_clip}'"
-        else:
-            ref = f"clip '{clip_name}'" if clip_name else f"clip {clip_index}"
+        label = changed_clip or clip_name
+        ref = f"clip '{label}'" if label else f"clip {clip_index}"
         if action == "clear_all":
             return f"Cleared all automation on {ref}, track {track_index}"
         return f"Automation {action}: {parameter_name} on {ref}, track {track_index}"

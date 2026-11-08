@@ -1,185 +1,129 @@
-"""Static checks that the MCP server and the Remote Script agree on commands.
+"""The MCP server and the Remote Script must agree on which commands write.
 
-Adding a write command means editing three lists that nothing else ties
-together: the Remote Script's main-thread "gate" list, the if/elif chain in
-``main_thread_task``, and the MCP server's ``is_modifying_command`` list. A
-gate entry with no chain branch silently returns ``{"status": "success",
-"result": None}``, so drift looks like success. These tests parse both modules
-(no imports, no Live) and fail on any disagreement.
+The Remote Script runs MAIN_THREAD_COMMANDS on Live's main thread; the MCP
+server gives MODIFYING_COMMANDS the longer write timeout. Nothing else ties the
+two lists together, so these tests compare them, and check them against the
+commands the MCP tools actually send over the wire. In that protocol, read
+commands are named ``get_*`` and everything else changes Live's state.
 """
 
-import ast
+import inspect
 import os
+import sys
+import types
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-_ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
-_SERVER = os.path.join(_ROOT, "MCP_Server", "server.py")
-_REMOTE = os.path.join(_ROOT, "AbletonMCP_Remote_Script", "__init__.py")
+_mock_fastmcp = MagicMock()
+_mock_fastmcp.FastMCP.return_value.tool.return_value = lambda fn: fn
+sys.modules['mcp'] = MagicMock()
+sys.modules['mcp.server'] = MagicMock()
+sys.modules['mcp.server.fastmcp'] = _mock_fastmcp
 
 
-def _parse(path):
-    with open(path, encoding="utf-8") as f:
-        return ast.parse(f.read(), filename=path)
+class _StubControlSurface:
+    def __init__(self, c_instance=None):
+        pass
+
+    def log_message(self, msg):
+        pass
 
 
-def _string_list(node):
-    if not isinstance(node, (ast.List, ast.Tuple, ast.Set)):
-        return None
-    values = []
-    for elt in node.elts:
-        if not (isinstance(elt, ast.Constant) and isinstance(elt.value, str)):
-            return None
-        values.append(elt.value)
-    return values
+_cs_module = types.ModuleType("_Framework.ControlSurface")
+_cs_module.ControlSurface = _StubControlSurface
+sys.modules.setdefault("_Framework", types.ModuleType("_Framework"))
+sys.modules.setdefault("_Framework.ControlSurface", _cs_module)
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+
+from AbletonMCP_Remote_Script import MAIN_THREAD_COMMANDS  # noqa: E402
+from MCP_Server import server  # noqa: E402
+
+_PLACEHOLDERS = {int: 1, float: 1.0, str: "x", bool: True}
+
+# Arguments that get a tool past its input checks to the command it exists for.
+_TOOL_ARGS = {
+    "delete_arrangement_clip": {"clip_index": 1},
+    "set_arrangement_clip_property": {"muted": True},
+    "delete_track": {"track_index": 1},
+}
+
+# Enough session state for delete_track to pass its last-track guard.
+_RESPONSE = {"track_count": 2}
 
 
-def _is_command_type(node):
-    return isinstance(node, ast.Name) and node.id == "command_type"
+def _mcp_tools():
+    return {
+        name: fn for name, fn in inspect.getmembers(server, inspect.isfunction)
+        if fn.__module__ == server.__name__
+        and list(inspect.signature(fn).parameters)[:1] == ["ctx"]
+    }
 
 
-def _compare_strings(test, op_type):
-    """Return string(s) from `command_type == "x"` or `command_type in [...]`."""
-    if not (isinstance(test, ast.Compare) and _is_command_type(test.left)
-            and len(test.ops) == 1 and isinstance(test.ops[0], op_type)):
-        return None
-    comparator = test.comparators[0]
-    if op_type is ast.Eq:
-        if isinstance(comparator, ast.Constant) and isinstance(comparator.value, str):
-            return [comparator.value]
-        return None
-    return _string_list(comparator)
-
-
-def _if_chain(if_node):
-    """Yield each (test, body) along an if/elif chain."""
-    while True:
-        yield if_node.test, if_node.body
-        if len(if_node.orelse) == 1 and isinstance(if_node.orelse[0], ast.If):
-            if_node = if_node.orelse[0]
-        else:
-            return
-
-
-def _find_function(tree, name):
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == name:
-            return node
-    raise AssertionError("function {0} not found".format(name))
-
-
-def _remote_script_commands():
-    """Return (gate, chain, direct) command sets from _process_command."""
-    process = _find_function(_parse(_REMOTE), "_process_command")
-    dispatch = next(
-        node for node in ast.walk(process)
-        if isinstance(node, ast.If) and _compare_strings(node.test, ast.Eq)
-    )
-
-    gate, direct, gate_body = [], [], None
-    for test, body in _if_chain(dispatch):
-        in_list = _compare_strings(test, ast.In)
-        if in_list is not None:
-            assert gate_body is None, "expected exactly one main-thread gate list"
-            gate, gate_body = in_list, body
-            continue
-        names = _compare_strings(test, ast.Eq)
-        assert names, "unrecognised dispatch test at line {0}".format(test.lineno)
-        direct.extend(names)
-    assert gate_body is not None, "main-thread gate list not found"
-
-    task = next(
-        node for stmt in gate_body for node in ast.walk(stmt)
-        if isinstance(node, ast.FunctionDef) and node.name == "main_thread_task"
-    )
-    chain_if = next(
-        node for node in ast.walk(task)
-        if isinstance(node, ast.If) and _compare_strings(node.test, ast.Eq)
-    )
-    chain = []
-    for test, _body in _if_chain(chain_if):
-        names = _compare_strings(test, ast.Eq)
-        assert names, "unrecognised chain test at line {0}".format(test.lineno)
-        chain.extend(names)
-    return gate, chain, direct
-
-
-def _mcp_sent_commands():
-    sent = set()
-    for node in ast.walk(_parse(_SERVER)):
-        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "send_command" and node.args
-                and isinstance(node.args[0], ast.Constant)
-                and isinstance(node.args[0].value, str)):
-            sent.add(node.args[0].value)
-    return sent
-
-
-def _mcp_modifying_commands():
-    send = _find_function(_parse(_SERVER), "send_command")
-    for node in ast.walk(send):
-        if (isinstance(node, ast.Assign) and len(node.targets) == 1
-                and isinstance(node.targets[0], ast.Name)
-                and node.targets[0].id == "is_modifying_command"):
-            values = _compare_strings(node.value, ast.In)
-            assert values is not None, "is_modifying_command is not a literal list"
-            return values
-    raise AssertionError("is_modifying_command not found in send_command")
+def _call_args(name, tool):
+    params = list(inspect.signature(tool).parameters.values())[1:]
+    kwargs = {p.name: _PLACEHOLDERS.get(p.annotation, [])
+              for p in params if p.default is inspect.Parameter.empty}
+    kwargs.update(_TOOL_ARGS.get(name, {}))
+    return kwargs
 
 
 @pytest.fixture(scope="module")
-def remote():
-    gate, chain, direct = _remote_script_commands()
-    return {"gate": gate, "chain": chain, "direct": direct}
+def sent_by_tool():
+    """Run every MCP tool against a recording connection."""
+    tools = _mcp_tools()
+    assert tools, "no MCP tools found; is @mcp.tool() a pass-through?"
+    sent = {}
+    try:
+        for name, tool in sorted(tools.items()):
+            server._invalidate_external_plugin_cache()
+            conn = MagicMock()
+            conn.send_command.return_value = dict(_RESPONSE)
+            with patch.object(server, "get_ableton_connection", return_value=conn):
+                tool(MagicMock(), **_call_args(name, tool))
+            sent[name] = [c.args[0] for c in conn.send_command.call_args_list]
+    finally:
+        server._invalidate_external_plugin_cache()
+    return sent
 
 
 def _duplicates(values):
     return sorted({v for v in values if values.count(v) > 1})
 
 
-def test_parser_finds_known_commands(remote):
-    # Guard against the parser silently matching nothing.
-    assert "set_arrangement_clip_property" in remote["gate"]
-    assert "set_arrangement_clip_property" in remote["chain"]
-    assert "get_session_info" in remote["direct"]
-    assert "set_arrangement_clip_property" in _mcp_modifying_commands()
-    assert "get_session_info" in _mcp_sent_commands()
-
-
-def test_every_gate_command_has_a_chain_branch(remote):
-    missing = sorted(set(remote["gate"]) - set(remote["chain"]))
-    assert not missing, (
-        "In the main-thread gate list but no main_thread_task branch "
-        "(would return success with result None): {0}".format(missing))
-
-
-def test_every_chain_branch_is_reachable_through_the_gate(remote):
-    dead = sorted(set(remote["chain"]) - set(remote["gate"]))
-    assert not dead, "main_thread_task branches the gate never routes to: {0}".format(dead)
-
-
-def test_no_command_dispatched_both_directly_and_on_main_thread(remote):
-    both = sorted(set(remote["gate"]) & set(remote["direct"]))
-    assert not both, "Commands in both the direct and main-thread paths: {0}".format(both)
-
-
-def test_no_duplicate_entries(remote):
-    assert not _duplicates(remote["gate"]), "duplicate gate entries"
-    assert not _duplicates(remote["chain"]), "duplicate chain branches"
-    assert not _duplicates(remote["direct"]), "duplicate direct branches"
-    assert not _duplicates(_mcp_modifying_commands()), "duplicate MCP modifying entries"
-
-
-def test_mcp_modifying_list_matches_remote_gate(remote):
-    mcp = set(_mcp_modifying_commands())
-    gate = set(remote["gate"])
-    assert mcp == gate, (
-        "MCP is_modifying_command and Remote Script gate list disagree. "
+def test_modifying_commands_match_main_thread_commands():
+    mcp, remote = set(server.MODIFYING_COMMANDS), set(MAIN_THREAD_COMMANDS)
+    assert mcp == remote, (
+        "MCP MODIFYING_COMMANDS and Remote Script MAIN_THREAD_COMMANDS disagree. "
         "Only in MCP: {0}. Only in Remote Script: {1}".format(
-            sorted(mcp - gate), sorted(gate - mcp)))
+            sorted(mcp - remote), sorted(remote - mcp)))
 
 
-def test_every_mcp_command_has_a_remote_handler(remote):
-    handled = set(remote["chain"]) | set(remote["direct"])
-    missing = sorted(_mcp_sent_commands() - handled)
-    assert not missing, "MCP sends commands with no Remote Script handler: {0}".format(missing)
+def test_command_lists_have_no_duplicates():
+    assert not _duplicates(server.MODIFYING_COMMANDS)
+    assert not _duplicates(MAIN_THREAD_COMMANDS)
+
+
+def test_every_mcp_tool_sends_a_command(sent_by_tool):
+    silent = sorted(name for name, commands in sent_by_tool.items() if not commands)
+    assert not silent, (
+        "These tools sent nothing, so their commands go unchecked; "
+        "add arguments to _TOOL_ARGS: {0}".format(silent))
+
+
+def test_every_write_command_the_mcp_sends_is_modifying(sent_by_tool):
+    sent = set().union(*sent_by_tool.values())
+    writes = {c for c in sent if not c.startswith("get_")}
+    unclassified = sorted(writes - set(server.MODIFYING_COMMANDS))
+    assert not unclassified, (
+        "MCP tools send write commands missing from MODIFYING_COMMANDS "
+        "and MAIN_THREAD_COMMANDS: {0}".format(unclassified))
+
+
+def test_no_read_command_the_mcp_sends_is_modifying(sent_by_tool):
+    sent = set().union(*sent_by_tool.values())
+    reads = {c for c in sent if c.startswith("get_")}
+    misclassified = sorted(reads & set(server.MODIFYING_COMMANDS))
+    assert not misclassified, (
+        "Read commands listed as modifying: {0}".format(misclassified))

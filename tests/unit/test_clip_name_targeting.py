@@ -126,6 +126,17 @@ class TestSetArrangementClipPropertyClipName:
         assert result == "Updated clip 4 on track 1: muted=False"
 
     @patch('MCP_Server.server.get_ableton_connection')
+    def test_unnamed_clip_is_labelled_by_index(self, mock_conn):
+        # Live gives new clips an empty name; that must not print as ''.
+        mock_conn.return_value = _connection(
+            {"clip_name": "", "property": "x", "value": 1})
+
+        result = server.set_arrangement_clip_property(
+            MagicMock(), track_index=1, clip_index=1, muted=True, name="Verse")
+
+        assert result == "Updated clip 1 on track 1: muted=True, name=Verse"
+
+    @patch('MCP_Server.server.get_ableton_connection')
     def test_clip_index_zero_without_name_errors_instead_of_hitting_first_clip(self, mock_conn):
         conn = _connection({})
         mock_conn.return_value = conn
@@ -192,6 +203,16 @@ class TestManageClipAutomationClipName:
             MagicMock(), track_index=1, clip_index=5, action="clear_all")
 
         assert result == "Cleared all automation on clip 5, track 1"
+
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_unnamed_clip_is_labelled_by_index(self, mock_conn):
+        mock_conn.return_value = _connection(
+            {"action": "clear_all", "clip_name": "", "done": True})
+
+        result = server.manage_clip_automation(
+            MagicMock(), track_index=1, clip_index=1, action="clear_all")
+
+        assert result == "Cleared all automation on clip 1, track 1"
 
     @patch('MCP_Server.server.get_ableton_connection')
     def test_clip_index_zero_without_name_errors(self, mock_conn):

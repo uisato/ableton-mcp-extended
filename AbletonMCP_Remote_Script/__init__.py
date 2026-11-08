@@ -18,6 +18,28 @@ except ImportError:
 DEFAULT_PORT = 9877
 HOST = "localhost"
 
+# Commands that modify Live's state and so run on Live's main thread. Must
+# match the MCP server's MODIFYING_COMMANDS; tests/unit/test_command_consistency.py
+# enforces this.
+MAIN_THREAD_COMMANDS = (
+    "create_midi_track", "set_track_name",
+    "create_clip", "add_notes_to_clip", "set_clip_name",
+    "set_tempo", "fire_clip", "stop_clip",
+    "start_playback", "stop_playback", "load_browser_item",
+    "set_song_time", "set_arrangement_loop", "jump_to_cue",
+    "create_cue_point", "delete_cue_point",
+    "create_arrangement_clip", "create_arrangement_audio_clip",
+    "duplicate_to_arrangement", "delete_arrangement_clip",
+    "set_arrangement_clip_property",
+    "set_view", "control_arrangement_view",
+    "manage_clip_automation",
+    "add_notes_to_arrangement_clip",
+    "set_device_parameter", "set_device_enabled",
+    "delete_device", "navigate_preset",
+    "delete_track",
+    "set_track_volume", "set_track_panning",
+)
+
 def create_instance(c_instance):
     """Create and return the AbletonMCP script instance"""
     return AbletonMCP(c_instance)
@@ -226,22 +248,7 @@ class AbletonMCP(ControlSurface):
                 track_index = params.get("track_index", 0)
                 response["result"] = self._get_track_info(track_index)
             # Commands that modify Live's state should be scheduled on the main thread
-            elif command_type in ["create_midi_track", "set_track_name",
-                                 "create_clip", "add_notes_to_clip", "set_clip_name",
-                                 "set_tempo", "fire_clip", "stop_clip",
-                                 "start_playback", "stop_playback", "load_browser_item",
-                                 "set_song_time", "set_arrangement_loop", "jump_to_cue",
-                                 "create_cue_point", "delete_cue_point",
-                                 "create_arrangement_clip", "create_arrangement_audio_clip",
-                                 "duplicate_to_arrangement", "delete_arrangement_clip",
-                                 "set_arrangement_clip_property",
-                                 "set_view", "control_arrangement_view",
-                                 "manage_clip_automation",
-                                 "add_notes_to_arrangement_clip",
-                                 "set_device_parameter", "set_device_enabled",
-                                 "delete_device", "navigate_preset",
-                                 "delete_track",
-                                 "set_track_volume", "set_track_panning"]:
+            elif command_type in MAIN_THREAD_COMMANDS:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
