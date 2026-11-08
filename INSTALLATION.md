@@ -97,7 +97,7 @@ When you pull a newer version, copy the new `__init__.py` over the old one, then
 1. **Delete the `__pycache__` folder** inside your installed `AbletonMCP` folder (and inside `AbletonMCP_UDP` if you use it). Live caches the compiled script there and can keep loading the stale `.pyc` instead of your new file.
 2. **Quit and restart Ableton Live** so it loads the new script.
 
-If a new command reports `Unknown command`, or a fix doesn't seem to take effect, check for a leftover `__pycache__` first.
+If a new command reports `Unknown command`, targeting a clip by name fails with `Clip index -1 out of range`, or a fix doesn't seem to take effect, check for a leftover `__pycache__` first.
 
 ---
 
