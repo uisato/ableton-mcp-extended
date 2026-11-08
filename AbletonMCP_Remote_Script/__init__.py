@@ -286,10 +286,6 @@ class AbletonMCP(ControlSurface):
                             result = self._start_playback()
                         elif command_type == "stop_playback":
                             result = self._stop_playback()
-                        elif command_type == "load_instrument_or_effect":
-                            track_index = params.get("track_index", 0)
-                            uri = params.get("uri", "")
-                            result = self._load_instrument_or_effect(track_index, uri)
                         elif command_type == "load_browser_item":
                             track_index = params.get("track_index", 0)
                             item_uri = params.get("item_uri", "")
@@ -335,10 +331,11 @@ class AbletonMCP(ControlSurface):
                             result = self._delete_arrangement_clip(ti, ci, cn)
                         elif command_type == "set_arrangement_clip_property":
                             ti = params.get("track_index", 0)
-                            ci = params.get("clip_index", 0)
+                            ci = params.get("clip_index", None)
+                            cn = params.get("clip_name", None)
                             prop = params.get("property", "")
                             val = params.get("value", None)
-                            result = self._set_arrangement_clip_property(ti, ci, prop, val)
+                            result = self._set_arrangement_clip_property(ti, ci, prop, val, cn)
                         elif command_type == "set_view":
                             vn = params.get("view_name", "Arranger")
                             result = self._set_view(vn)
@@ -348,10 +345,11 @@ class AbletonMCP(ControlSurface):
                             result = self._control_arrangement_view(action, ti)
                         elif command_type == "manage_clip_automation":
                             ti = params.get("track_index", 0)
-                            ci = params.get("clip_index", 0)
+                            ci = params.get("clip_index", None)
+                            cn = params.get("clip_name", None)
                             action = params.get("action", "create")
                             pn = params.get("parameter_name", "")
-                            result = self._manage_clip_automation(ti, ci, action, pn)
+                            result = self._manage_clip_automation(ti, ci, action, pn, cn)
                         elif command_type == "add_notes_to_arrangement_clip":
                             ti = params.get("track_index", 0)
                             ci = params.get("clip_index", 0)
@@ -1403,17 +1401,24 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error deleting arrangement clip: " + str(e))
             raise
 
-    def _set_arrangement_clip_property(self, track_index, clip_index, property_name, value):
-        """Set a property on an arrangement clip."""
+    def _set_arrangement_clip_property(self, track_index, clip_index, property_name, value,
+                                       clip_name=None):
+        """Set a property on an arrangement clip addressed by index or name.
+
+        The returned clip_name is the clip's name before the change, so the
+        caller can report which clip was actually modified.
+        """
         try:
             ALLOWED = ("name", "muted", "color", "looping", "loop_start", "loop_end",
                        "gain", "pitch_coarse", "pitch_fine", "warping", "warp_mode")
             if property_name not in ALLOWED:
                 raise ValueError("Property '{0}' not allowed. Allowed: {1}".format(
                     property_name, ", ".join(ALLOWED)))
-            track, clip = self._resolve_arrangement_clip(track_index, clip_index)
+            track, clip = self._resolve_arrangement_clip(track_index, clip_index, clip_name)
+            resolved_name = clip.name
             setattr(clip, property_name, value)
-            return {"property": property_name, "value": getattr(clip, property_name)}
+            return {"clip_name": resolved_name, "property": property_name,
+                    "value": getattr(clip, property_name)}
         except Exception as e:
             self.log_message("Error setting arrangement clip property: " + str(e))
             raise
@@ -1459,13 +1464,14 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error controlling arrangement view: " + str(e))
             raise
 
-    def _manage_clip_automation(self, track_index, clip_index, action, parameter_name=""):
-        """Create or clear automation envelopes."""
+    def _manage_clip_automation(self, track_index, clip_index, action, parameter_name="",
+                                clip_name=None):
+        """Create or clear automation envelopes on a clip addressed by index or name."""
         try:
-            track, clip = self._resolve_arrangement_clip(track_index, clip_index)
+            track, clip = self._resolve_arrangement_clip(track_index, clip_index, clip_name)
             if action == "clear_all":
                 clip.clear_all_envelopes()
-                return {"action": "clear_all", "done": True}
+                return {"action": "clear_all", "clip_name": clip.name, "done": True}
             # Find the parameter
             param = None
             # Check mixer device first
@@ -1494,10 +1500,12 @@ class AbletonMCP(ControlSurface):
                     parameter_name, track.name))
             if action == "create":
                 clip.create_automation_envelope(param)
-                return {"action": "create", "parameter": param.name, "done": True}
+                return {"action": "create", "parameter": param.name,
+                        "clip_name": clip.name, "done": True}
             elif action == "clear":
                 clip.clear_envelope(param)
-                return {"action": "clear", "parameter": param.name, "done": True}
+                return {"action": "clear", "parameter": param.name,
+                        "clip_name": clip.name, "done": True}
             else:
                 raise ValueError("Unknown action: " + action)
         except Exception as e:

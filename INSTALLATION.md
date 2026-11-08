@@ -90,6 +90,15 @@ Same would apply if you want to install the UDP version of Ableton MCP server. C
 
 > 💡 **Tip:** Double-check this folder structure - it's the most common source of installation issues.
 
+### Updating the Remote Script
+
+When you pull a newer version, copy the new `__init__.py` over the old one, then:
+
+1. **Delete the `__pycache__` folder** inside your installed `AbletonMCP` folder (and inside `AbletonMCP_UDP` if you use it). Live caches the compiled script there and can keep loading the stale `.pyc` instead of your new file.
+2. **Quit and restart Ableton Live** so it loads the new script.
+
+If a new command reports `Unknown command`, or a fix doesn't seem to take effect, check for a leftover `__pycache__` first.
+
 ---
 
 ### Step 3: Configure Ableton Live

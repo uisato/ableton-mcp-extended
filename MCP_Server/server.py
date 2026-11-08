@@ -113,11 +113,13 @@ class AbletonConnection:
         }
         
         # Check if this is a state-modifying command
+        # Must match the Remote Script's main-thread command list;
+        # tests/unit/test_command_consistency.py enforces this.
         is_modifying_command = command_type in [
-            "create_midi_track", "create_audio_track", "set_track_name",
+            "create_midi_track", "set_track_name",
             "create_clip", "add_notes_to_clip", "set_clip_name",
-            "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
-            "start_playback", "stop_playback", "load_instrument_or_effect",
+            "set_tempo", "fire_clip", "stop_clip",
+            "start_playback", "stop_playback", "load_browser_item",
             "set_song_time", "set_arrangement_loop", "jump_to_cue",
             "create_cue_point", "delete_cue_point",
             "create_arrangement_clip", "create_arrangement_audio_clip",
@@ -128,6 +130,7 @@ class AbletonConnection:
             "add_notes_to_arrangement_clip",
             "set_device_parameter", "set_device_enabled",
             "delete_device", "navigate_preset",
+            "delete_track",
             "set_track_volume", "set_track_panning",
         ]
         
@@ -227,6 +230,19 @@ def _to_zero_based(index: int, field_name: str = "index") -> int:
             f"{field_name} must be >= 1 (1-based), got {index}"
         )
     return index - 1
+
+
+def _arrangement_clip_target(clip_index: int, clip_name: str) -> Dict[str, Any]:
+    """Build the clip-addressing params for arrangement clip commands.
+
+    A non-empty clip_name wins. It is sent with clip_index -1: the Remote Script
+    resolves by name first and ignores the index, while an outdated Remote Script
+    that drops clip_name fails on the out-of-range index instead of silently
+    changing the track's first clip.
+    """
+    if clip_name:
+        return {"clip_name": clip_name, "clip_index": -1}
+    return {"clip_index": _to_zero_based(clip_index, "clip_index")}
 
 
 def _optional_to_zero_based(index: int, field_name: str = "index") -> int | None:
@@ -1572,30 +1588,35 @@ def set_arrangement_clip_property(
     try:
         ableton = get_ableton_connection()
         ti = _to_zero_based(track_index, "track_index")
-        ci = _to_zero_based(clip_index, "clip_index") if clip_index > 0 else 0
+        target = _arrangement_clip_target(clip_index, clip_name)
 
+        # "name" goes last: renaming first would break name-based lookup
+        # for the remaining properties.
         props = {
-            "name": name, "muted": muted, "color": color, "looping": looping,
+            "muted": muted, "color": color, "looping": looping,
             "loop_start": loop_start, "loop_end": loop_end, "gain": gain,
             "pitch_coarse": pitch_coarse, "pitch_fine": pitch_fine,
-            "warping": warping, "warp_mode": warp_mode,
+            "warping": warping, "warp_mode": warp_mode, "name": name,
         }
 
         changes = []
+        changed_clip = None
         for prop_name, value in props.items():
             if value is not None and value != "":
-                ableton.send_command("set_arrangement_clip_property", {
-                    "track_index": ti,
-                    "clip_index": ci,
-                    "property": prop_name,
-                    "value": value,
-                })
+                params = {"track_index": ti, **target,
+                          "property": prop_name, "value": value}
+                result = ableton.send_command("set_arrangement_clip_property", params)
+                if changed_clip is None and isinstance(result, dict):
+                    changed_clip = result.get("clip_name")
                 changes.append(f"{prop_name}={value}")
 
         if not changes:
             return "No properties specified to change."
 
-        ref = f"'{clip_name}'" if clip_name else f"clip {clip_index}"
+        if changed_clip is not None:
+            ref = f"'{changed_clip}'"
+        else:
+            ref = f"'{clip_name}'" if clip_name else f"clip {clip_index}"
         return f"Updated {ref} on track {track_index}: {', '.join(changes)}"
     except Exception as e:
         logger.error(f"Error setting arrangement clip property: {str(e)}")
@@ -1662,17 +1683,18 @@ def manage_clip_automation(
     try:
         ableton = get_ableton_connection()
         ti = _to_zero_based(track_index, "track_index")
-        ci = _to_zero_based(clip_index, "clip_index") if clip_index > 0 else 0
-        result = ableton.send_command("manage_clip_automation", {
-            "track_index": ti,
-            "clip_index": ci,
-            "action": action,
-            "parameter_name": parameter_name,
-        })
+        params = {"track_index": ti, **_arrangement_clip_target(clip_index, clip_name),
+                  "action": action, "parameter_name": parameter_name}
+        result = ableton.send_command("manage_clip_automation", params)
 
+        changed_clip = result.get("clip_name") if isinstance(result, dict) else None
+        if changed_clip is not None:
+            ref = f"clip '{changed_clip}'"
+        else:
+            ref = f"clip '{clip_name}'" if clip_name else f"clip {clip_index}"
         if action == "clear_all":
-            return f"Cleared all automation on clip {clip_index}, track {track_index}"
-        return f"Automation {action}: {parameter_name} on clip {clip_index}, track {track_index}"
+            return f"Cleared all automation on {ref}, track {track_index}"
+        return f"Automation {action}: {parameter_name} on {ref}, track {track_index}"
     except Exception as e:
         logger.error(f"Error managing clip automation: {str(e)}")
         return f"Error managing clip automation: {str(e)}"

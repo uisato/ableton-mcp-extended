@@ -10,12 +10,19 @@ _control_surface_module = types.ModuleType("_Framework.ControlSurface")
 
 
 class _DummyControlSurface:
-    pass
+    def __init__(self, c_instance=None):
+        pass
+
+    def log_message(self, msg):
+        pass
 
 
+# setdefault, not assignment: whichever test module imports the Remote Script
+# first decides the stub, so every stub must provide log_message for error
+# paths to be testable in a full-suite run.
 _control_surface_module.ControlSurface = _DummyControlSurface
-sys.modules["_Framework"] = _framework_module
-sys.modules["_Framework.ControlSurface"] = _control_surface_module
+sys.modules.setdefault("_Framework", _framework_module)
+sys.modules.setdefault("_Framework.ControlSurface", _control_surface_module)
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
